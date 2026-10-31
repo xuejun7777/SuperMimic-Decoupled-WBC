@@ -1,0 +1,33 @@
+name: Lint & Syntax Check
+
+on:
+  push:
+    branches: ["main", "master", "release/**"]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Ruff
+        run: pip install ruff>=0.6.0
+      - name: Compile Python AST (Zero Syntax Errors)
+        run: |
+          python -m py_compile \
+            legged_lab/supermimic/*.py \
+            legged_lab/scripts/train_supermimic.py \
+            legged_lab/scripts/eval_compare.py \
+            legged_lab/scripts/run_diagnostics.py \
+            legged_lab/scripts/record_demo_video.py
+      - name: Ruff Lint SuperMimic Modules
+        run: |
+          ruff check --extend-ignore E402,E501,I001 \
+            legged_lab/supermimic \
+            legged_lab/scripts/train_supermimic.py \
+            legged_lab/scripts/eval_compare.py \
+            legged_lab/scripts/run_diagnostics.py \
+            legged_lab/scripts/record_demo_video.py

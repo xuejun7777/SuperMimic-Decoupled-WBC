@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use SuperMimic-Decoupled-WBC in your research, please cite this repository along with the foundational SuperMimic and Humanoid Touch Dream papers."
+title: "SuperMimic-Decoupled-WBC: Reference-Free Differentiable World Model RL for Humanoid Loco-Manipulation Whole-Body Control"
+type: software
+license: BSD-3-Clause
+version: 0.1.0
+date-released: "2026-10-31"
+authors:
+  - name: "SuperMimic-Decoupled-WBC Contributors"
+keywords:
+  - humanoid-robotics
+  - whole-body-control
+  - loco-manipulation
+  - differentiable-world-model
+  - analytic-bptt
+  - reinforcement-learning
+  - unitree-g1
+  - isaac-lab
+references:
+  - type: article
+    title: "SuperMimic: Scaling Humanoid Whole-Body Control with One Differentiable World Model"
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2610.28480"
+  - type: article
+    title: "Learning Versatile Humanoid Manipulation with Touch Dreaming"
+    authors:
+      - family-names: Niu
+        given-names: Yaru
+      - family-names: Zhao
+        given-names: Ding
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2604.13015"
