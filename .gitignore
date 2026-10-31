@@ -1,0 +1,48 @@
+logs/
+wandb/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local editor and OS files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Local notes and captured logs
+readme.txt
+erroroutput.txt
+*.log
+
+# Demo sources and generated media are intentionally omitted from release branches.
+/demo/
+
+# Locally cloned external SDKs
+deploy/unitree_sdk2_python/
+
+# Large generated training/deployment artifacts.
+# Bundled deployment policies under deploy/policy/ and released example checkpoints
+# under example/ are intentionally tracked.
+frames*/
+*.pt
+*.pth
+*.onnx
+!deploy/policy/**/*.pt
+!example/**/*.pt
