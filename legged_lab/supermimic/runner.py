@@ -33,6 +33,7 @@ from legged_lab.supermimic.imagination import (
 )
 from legged_lab.supermimic.nets import ActorCfg, CriticCfg, PrivilegedCriticMLP, TeacherActorMLP
 from legged_lab.supermimic.replay_buffer import G1ReplayBuffer
+from legged_lab.supermimic.symmetry import G1SagittalSymmetry
 from legged_lab.supermimic.usd_fk import UsdArticulationFK
 from legged_lab.supermimic.world_model import G1WorldModel, WorldModelCfg
 
@@ -83,8 +84,9 @@ class SuperMimicRunner:
         self.device = torch.device(device)
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # Build USD-exact differentiable FK & 31-term differentiable reward module
+        # Build USD-exact differentiable FK, sagittal symmetry operator, & 31-term differentiable rewards
         self.fk = UsdArticulationFK(env.robot, device=self.device)
+        self.symmetry = G1SagittalSymmetry(env, self.fk, device=self.device)
         self.diff_rewards = DifferentiableG1Rewards(env, self.fk).to(self.device)
 
         default_arm_pos = env.custom_default_joint_pos[0, env.num_actions : env.num_actions + 14].clone()
@@ -98,13 +100,14 @@ class SuperMimicRunner:
         self.actor = TeacherActorMLP(cfg.actor).to(self.device)
         self.critic = PrivilegedCriticMLP(cfg.critic).to(self.device)
 
-        self.wm_trainer = WorldModelTrainer(self.wm, cfg.wm_trainer)
+        self.wm_trainer = WorldModelTrainer(self.wm, cfg.wm_trainer, symmetry=self.symmetry)
         self.policy_trainer = PolicyCriticTrainer(
             wm=self.wm,
             actor=self.actor,
             critic=self.critic,
             diff_rewards=self.diff_rewards,
             cfg=cfg.policy_trainer,
+            symmetry=self.symmetry,
         )
 
         self.buffer = G1ReplayBuffer(
@@ -136,6 +139,21 @@ class SuperMimicRunner:
     def _action_noise_at(self, progress: float) -> float:
         p = min(max(progress, 0.0), 1.0)
         return self.cfg.action_noise_init + (self.cfg.action_noise_final - self.cfg.action_noise_init) * p
+
+    def _symmetry_weight_at(self, global_progress: float) -> float:
+        p_cfg = self.cfg.policy_trainer
+        target_w = float(p_cfg.symmetry_weight)
+        if target_w <= 0.0:
+            return 0.0
+        p = min(max(global_progress, 0.0), 1.0)
+        w0 = float(p_cfg.sym_warmup_ratio)
+        ramp = float(p_cfg.sym_ramp_ratio)
+        if p < w0:
+            return 0.0
+        if ramp <= 0.0 or p >= w0 + ramp:
+            return target_w
+        u = (p - w0) / ramp
+        return target_w * 0.5 * (1.0 - math.cos(math.pi * u))
 
     def save(
         self,
@@ -312,12 +330,15 @@ class SuperMimicRunner:
             in_warmup = needs_warmup and (local_it < eff_warmup_iters)
 
             progress = (it - start_it) / max(tot_it - start_it, 1)
+            global_progress = it / max(tot_it, 1)
             lr_mult = self._cosine_factor(progress, self.cfg.lr_final_ratio)
             self.wm_trainer.set_lr(self.cfg.wm_trainer.lr * lr_mult)
             self.policy_trainer.set_lr(
                 actor_lr=self.cfg.policy_trainer.actor_lr * lr_mult,
                 critic_lr=self.cfg.policy_trainer.critic_lr * lr_mult,
             )
+            cur_sym_weight = self._symmetry_weight_at(global_progress)
+            self.policy_trainer.set_symmetry_weight(cur_sym_weight)
             noise_std = self._action_noise_at(progress)
 
             t_collect = 0.0

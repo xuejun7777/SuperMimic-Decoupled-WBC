@@ -38,6 +38,29 @@ parser.add_argument("--action_noise_final", type=float, default=0.15, help="Fina
 parser.add_argument("--det_frac", type=float, default=0.20, help="Fraction of noise-free deterministic envs.")
 parser.add_argument("--warmup_iters", type=int, default=20, help="Warmup outer iterations (counted inside max_iterations).")
 parser.add_argument("--replay_capacity", type=int, default=1000, help="Per-env ring buffer capacity in steps.")
+parser.add_argument(
+    "--symmetry_weight",
+    type=float,
+    default=1.5,
+    help="Target weight of phase-gated sagittal mirror-equivariance loss L_sym on Actor actions (0.0 disables L_sym).",
+)
+parser.add_argument(
+    "--sym_warmup_ratio",
+    type=float,
+    default=0.45,
+    help="Fraction of total iterations before ramping L_sym (allows unimpeded 7D skill & gait unzipping).",
+)
+parser.add_argument(
+    "--sym_ramp_ratio",
+    type=float,
+    default=0.15,
+    help="Fraction of total iterations over which L_sym half-cosine ramps from 0 to symmetry_weight.",
+)
+parser.add_argument(
+    "--no_mirror_aug",
+    action="store_true",
+    help="Disable sagittal mirror batch augmentation on WM windows and imagination starts.",
+)
 
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
@@ -127,10 +150,12 @@ def train() -> None:
         save_interval=int(args_cli.save_interval),
         use_tensorboard=(agent_cfg.logger in ("tensorboard", "wandb")),
     )
+    use_mirror_aug = not bool(args_cli.no_mirror_aug)
     sm_cfg.wm_trainer.window_k = int(args_cli.wm_k)
     sm_cfg.wm_trainer.batch_size = int(args_cli.wm_batch)
     sm_cfg.wm_trainer.batches_per_update = int(args_cli.wm_batches)
     sm_cfg.wm_trainer.lr = float(args_cli.wm_lr)
+    sm_cfg.wm_trainer.use_mirror_augmentation = use_mirror_aug
 
     sm_cfg.policy_trainer.horizon = int(args_cli.horizon)
     sm_cfg.policy_trainer.batch_size = int(args_cli.imag_batch)
@@ -139,6 +164,10 @@ def train() -> None:
     sm_cfg.policy_trainer.actor_lr = float(args_cli.actor_lr)
     sm_cfg.policy_trainer.critic_lr = float(args_cli.critic_lr)
     sm_cfg.policy_trainer.obs_noise_in_imagination = bool(env_cfg.noise.add_noise)
+    sm_cfg.policy_trainer.use_mirror_augmentation = use_mirror_aug
+    sm_cfg.policy_trainer.symmetry_weight = float(args_cli.symmetry_weight)
+    sm_cfg.policy_trainer.sym_warmup_ratio = float(args_cli.sym_warmup_ratio)
+    sm_cfg.policy_trainer.sym_ramp_ratio = float(args_cli.sym_ramp_ratio)
 
     sm_cfg.actor.hidden_dims = tuple(int(x) for x in agent_cfg.policy.actor_hidden_dims)
     sm_cfg.critic.hidden_dims = tuple(int(x) for x in agent_cfg.policy.critic_hidden_dims)

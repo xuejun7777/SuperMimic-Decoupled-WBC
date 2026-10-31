@@ -10,6 +10,7 @@ det_frac: 0.2
 lr_final_ratio: 0.15
 log_interval: 20
 save_interval: 500
+keep_only_best_and_last: true
 use_tensorboard: true
 world_model:
   hidden: !!python/tuple
@@ -63,6 +64,7 @@ wm_trainer:
   lr: 0.0003
   weight_decay: 1.0e-05
   grad_clip_norm: 1.0
+  use_mirror_augmentation: true
   use_cudagraph: true
 actor:
   obs_dim: 60
@@ -98,4 +100,10 @@ policy_trainer:
   obs_noise_in_imagination: true
   ood_action_limit: 10.0
   ood_action_weight: 0.1
+  use_mirror_augmentation: true
+  symmetry_weight: 1.5
+  sym_tau_low: 0.18
+  sym_tau_high: 0.45
+  sym_warmup_ratio: 0.45
+  sym_ramp_ratio: 0.15
   use_cudagraph: true

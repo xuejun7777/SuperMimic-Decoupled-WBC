@@ -10,11 +10,16 @@ cd "$REPO_DIR"
 python legged_lab/scripts/train_supermimic.py \
     --task=g1_flat \
     --run_name=supermimic_g1_wbc \
+    --logger=tensorboard \
     --num_envs=4096 \
     --max_iterations=3000 \
     --save_interval=500 \
+    --seed=42 \
     --utd=0.4 \
     --horizon=24 \
+    --symmetry_weight=1.5 \
+    --sym_warmup_ratio=0.45 \
+    --sym_ramp_ratio=0.15 \
     --headless \
     --set commands.curriculum.body_height.start_iter=600 \
     --set commands.curriculum.body_height.end_iter=2000 \

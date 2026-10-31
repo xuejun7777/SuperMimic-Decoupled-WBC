@@ -7,7 +7,7 @@ obs_groups: {}
 clip_actions: null
 save_interval: 500
 experiment_name: g1_flat
-run_name: supermimic_a2a
+run_name: supermimic_sym_a2a
 logger: tensorboard
 neptune_project: leggedlab
 wandb_project: g1_flat

@@ -19,12 +19,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+from typing import TYPE_CHECKING
+
 import torch
 
 from legged_lab.supermimic.diff_rewards import DifferentiableG1Rewards
 from legged_lab.supermimic.nets import PrivilegedCriticMLP, TeacherActorMLP
 from legged_lab.supermimic.replay_buffer import G1ReplayBuffer, ImagStartBatch, WMWindowBatch
 from legged_lab.supermimic.world_model import G1WorldModel
+
+if TYPE_CHECKING:
+    from legged_lab.supermimic.symmetry import G1SagittalSymmetry
 
 
 @dataclass
@@ -35,6 +40,7 @@ class WMTrainerCfg:
     lr: float = 3.0e-4
     weight_decay: float = 1.0e-5
     grad_clip_norm: float = 1.0
+    use_mirror_augmentation: bool = True
     use_cudagraph: bool = True
 
 
@@ -58,15 +64,28 @@ class PolicyTrainerCfg:
     # Zero-bias safety guardrail strictly outside all physical G1 joint ranges (|a| > 10.0 <=> > 2.5 rad offset)
     ood_action_limit: float = 10.0
     ood_action_weight: float = 0.1
+    # Phase-asymmetry-gated sagittal mirror-symmetry equivariance & start-state reflection
+    use_mirror_augmentation: bool = True
+    symmetry_weight: float = 1.5
+    sym_tau_low: float = 0.18
+    sym_tau_high: float = 0.45
+    sym_warmup_ratio: float = 0.45
+    sym_ramp_ratio: float = 0.15
     use_cudagraph: bool = True
 
 
 class WorldModelTrainer:
     """Autoregressive k-step World Model trainer with native CUDA Graph capture."""
 
-    def __init__(self, wm: G1WorldModel, cfg: WMTrainerCfg):
+    def __init__(
+        self,
+        wm: G1WorldModel,
+        cfg: WMTrainerCfg,
+        symmetry: G1SagittalSymmetry | None = None,
+    ):
         self.wm = wm
         self.cfg = cfg
+        self.symmetry = symmetry
         use_fused = next(wm.parameters()).is_cuda
         self.opt = torch.optim.AdamW(
             wm.parameters(),
@@ -145,6 +164,8 @@ class WorldModelTrainer:
 
         for _ in range(n_batches):
             w = buffer.sample_windows(self.cfg.batch_size, self.cfg.window_k, xi_per_env)
+            if self.cfg.use_mirror_augmentation and self.symmetry is not None:
+                self.symmetry.augment_wm_window_half_(w)
             if self.cfg.use_cudagraph and w.states.is_cuda:
                 if self._wm_graph is None:
                     self._capture_wm_graph(w)
@@ -185,6 +206,7 @@ class PolicyCriticTrainer:
         critic: PrivilegedCriticMLP,
         diff_rewards: DifferentiableG1Rewards,
         cfg: PolicyTrainerCfg,
+        symmetry: G1SagittalSymmetry | None = None,
     ):
         self.wm = wm
         self.actor = actor
@@ -192,6 +214,7 @@ class PolicyCriticTrainer:
         self.critic_target = critic.make_ema_target()
         self.diff_rewards = diff_rewards
         self.cfg = cfg
+        self.symmetry = symmetry
 
         use_fused = next(actor.parameters()).is_cuda
         self.actor_opt = torch.optim.Adam(
@@ -209,6 +232,9 @@ class PolicyCriticTrainer:
         self._static_start: ImagStartBatch | None = None
         self._static_ro: dict[str, torch.Tensor] | None = None
         self._static_actor_loss: torch.Tensor | None = None
+        actor_dev = next(actor.parameters()).device
+        self._cur_sym_weight: float = float(cfg.symmetry_weight)
+        self._sym_weight_buf = torch.tensor(float(cfg.symmetry_weight), dtype=torch.float32, device=actor_dev)
 
     def set_lr(self, actor_lr: float, critic_lr: float | None = None) -> None:
         for g in self.actor_opt.param_groups:
@@ -216,6 +242,11 @@ class PolicyCriticTrainer:
         c_lr = critic_lr if critic_lr is not None else actor_lr
         for g in self.critic_opt.param_groups:
             g["lr"] = c_lr
+
+    def set_symmetry_weight(self, w: float) -> None:
+        """Update effective L_sym weight in-place on GPU so captured CUDA Graph uses the live scheduled weight."""
+        self._cur_sym_weight = float(w)
+        self._sym_weight_buf.fill_(float(w))
 
     def _single_imag_step(
         self,
@@ -234,6 +265,7 @@ class PolicyCriticTrainer:
         xi: torch.Tensor,
         xi_norm: torch.Tensor,
     ) -> tuple[
+        torch.Tensor,
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
@@ -289,7 +321,7 @@ class PolicyCriticTrainer:
             r_impact_pred=r_imp,
             return_diag=False,
         )
-        return a_tau, s_next, feat_next, p_foot_next, ct_next, at_next, cmd_next, r_next, d_next
+        return obs_tau.detach(), a_tau, s_next, feat_next, p_foot_next, ct_next, at_next, cmd_next, r_next, d_next
 
     def _rollout_imagination(
         self,
@@ -319,8 +351,11 @@ class PolicyCriticTrainer:
         survival = s_tau.new_ones(B)
         J = s_tau.new_zeros(B)
         ood_pen = s_tau.new_zeros(())
+        sym_pen = s_tau.new_zeros(())
+        sym_gate_frac = s_tau.new_zeros(())
 
         critic_xs: list[torch.Tensor] = []
+        obs_det_list: list[torch.Tensor] = []
         rewards_list: list[torch.Tensor] = []
         dones_list: list[torch.Tensor] = []
         survivals_list: list[torch.Tensor] = []
@@ -341,6 +376,7 @@ class PolicyCriticTrainer:
                 )
 
                 (
+                    obs_det,
                     a_tau,
                     s_next,
                     feat_next,
@@ -366,6 +402,7 @@ class PolicyCriticTrainer:
                     start.xi,
                     xi_norm,
                 )
+                obs_det_list.append(obs_det)
 
                 if cfg.ood_action_weight > 0.0:
                     excess = torch.relu(a_tau.abs() - cfg.ood_action_limit)
@@ -400,10 +437,29 @@ class PolicyCriticTrainer:
                 v_H = self.critic(x_H)
                 J = J + (cfg.gamma**H) * survival * v_H
 
+            # Phase-asymmetry-gated sagittal mirror-equivariance regularization over all H*B imagined observations
+            # (evaluated on detached obs_all so gradients strictly regularize pi_theta without steering dynamics,
+            # and gated to 0 on symmetric double-support standing so step initiation is never locked)
+            if self.symmetry is not None and cfg.symmetry_weight > 0.0:
+                obs_all = torch.cat(obs_det_list, dim=0)  # (H*B, 60)
+                obs_mir = self.symmetry.mirror_obs(obs_all)
+                sym_gate = self.symmetry.obs_asymmetry_gate(
+                    obs_all, obs_mir, tau_low=cfg.sym_tau_low, tau_high=cfg.sym_tau_high
+                )
+                a_both = self.actor(torch.cat([obs_all, obs_mir], dim=0))  # (2*H*B, 15)
+                hb = obs_all.shape[0]
+                a_orig = a_both[:hb]
+                a_mir = self.symmetry.mirror_act(a_both[hb:])
+                per_obs_mse = ((a_orig - a_mir) ** 2).mean(dim=-1)
+                sym_pen = (sym_gate * per_obs_mse).mean()
+                sym_gate_frac = sym_gate.mean().detach()
+
         X_all = torch.stack(critic_xs + [x_H.detach()], dim=0)  # (H+1, B, D)
         return {
             "J": J,
             "ood_pen": ood_pen,
+            "sym_pen": sym_pen,
+            "sym_gate_frac": sym_gate_frac,
             "X_all": X_all,
             "rewards": torch.stack(rewards_list, dim=0),  # (H, B)
             "dones": torch.stack(dones_list, dim=0),  # (H, B)
@@ -412,8 +468,14 @@ class PolicyCriticTrainer:
             "actions": torch.stack(actions_list, dim=0),  # (H, B, 15)
         }
 
-    def _capture_bptt_graph(self, sample: ImagStartBatch) -> None:
+    def _actor_objective_loss(self, ro: dict[str, torch.Tensor]) -> torch.Tensor:
         cfg = self.cfg
+        loss = -ro["J"].mean() / cfg.horizon + cfg.ood_action_weight * ro["ood_pen"]
+        if self.symmetry is not None and cfg.symmetry_weight > 0.0:
+            loss = loss + self._sym_weight_buf * ro["sym_pen"]
+        return loss
+
+    def _capture_bptt_graph(self, sample: ImagStartBatch) -> None:
         dev = sample.state.device
         self._static_start = ImagStartBatch(
             state=sample.state.clone(),
@@ -439,7 +501,7 @@ class PolicyCriticTrainer:
                 for _ in range(3):
                     self.actor_opt.zero_grad(set_to_none=False)
                     ro_w = self._rollout_imagination(ss, need_grad=True)
-                    loss_w = -ro_w["J"].mean() / cfg.horizon + cfg.ood_action_weight * ro_w["ood_pen"]
+                    loss_w = self._actor_objective_loss(ro_w)
                     loss_w.backward()
             torch.cuda.current_stream(device=dev).wait_stream(stream)
 
@@ -447,7 +509,7 @@ class PolicyCriticTrainer:
             with torch.cuda.graph(self._bptt_graph, stream=stream):
                 self.actor_opt.zero_grad(set_to_none=False)
                 ro_g = self._rollout_imagination(ss, need_grad=True)
-                loss_g = -ro_g["J"].mean() / cfg.horizon + cfg.ood_action_weight * ro_g["ood_pen"]
+                loss_g = self._actor_objective_loss(ro_g)
                 loss_g.backward()
                 self._static_ro = ro_g
                 self._static_actor_loss = loss_g.detach()
@@ -537,6 +599,8 @@ class PolicyCriticTrainer:
         last_stats: dict[str, float] = {}
         for _ in range(num_updates):
             start = buffer.sample_starts(self.cfg.batch_size, self.cfg.horizon, xi_per_env)
+            if self.cfg.use_mirror_augmentation and self.symmetry is not None and self._cur_sym_weight > 0.0:
+                self.symmetry.augment_imag_start_half_(start, min_asym_radius=self.cfg.sym_tau_high)
             ro = self._rollout_imagination(start, need_grad=False)
             last_stats = self._fit_critic(
                 X_all=ro["X_all"],
@@ -552,6 +616,8 @@ class PolicyCriticTrainer:
         """Run one H-step Analytic BPTT Actor update followed by GAE Critic update."""
         cfg = self.cfg
         start = buffer.sample_starts(cfg.batch_size, cfg.horizon, xi_per_env)
+        if cfg.use_mirror_augmentation and self.symmetry is not None and self._cur_sym_weight > 0.0:
+            self.symmetry.augment_imag_start_half_(start, min_asym_radius=cfg.sym_tau_high)
 
         if cfg.use_cudagraph and start.state.is_cuda:
             if self._bptt_graph is None:
@@ -575,9 +641,7 @@ class PolicyCriticTrainer:
             self.critic.requires_grad_(False)
             try:
                 ro = self._rollout_imagination(start, need_grad=True)
-                J_eager: torch.Tensor = ro["J"]
-                ood_pen: torch.Tensor = ro["ood_pen"]
-                actor_loss = -J_eager.mean() / cfg.horizon + cfg.ood_action_weight * ood_pen
+                actor_loss = self._actor_objective_loss(ro)
 
                 self.actor_opt.zero_grad(set_to_none=False)
                 actor_loss.backward()
@@ -595,6 +659,8 @@ class PolicyCriticTrainer:
                 self.critic.requires_grad_(True)
 
         J: torch.Tensor = ro["J"]
+        sym_pen: torch.Tensor = ro["sym_pen"]
+        sym_gate_frac: torch.Tensor = ro["sym_gate_frac"]
         actions: torch.Tensor = ro["actions"]
         rewards: torch.Tensor = ro["rewards"]
         dones: torch.Tensor = ro["dones"]
@@ -604,6 +670,9 @@ class PolicyCriticTrainer:
         metrics: dict[str, float] = {
             "actor/objective_J": float(J.detach().mean().item()),
             "actor/loss": float(actor_loss.detach().item()),
+            "actor/sym_mse": float(sym_pen.detach().item()),
+            "actor/sym_gate_frac": float(sym_gate_frac.detach().item()),
+            "actor/sym_weight": float(self._cur_sym_weight),
             "actor/grad_norm": gn_val,
             "actor/nonfinite_skipped": 1.0 if has_nonfinite else 0.0,
             "actor/action_abs_mean": float(actions.abs().mean().item()),

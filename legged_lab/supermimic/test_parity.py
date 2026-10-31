@@ -32,6 +32,7 @@ from legged_lab.supermimic.imagination import (
 )
 from legged_lab.supermimic.nets import ActorCfg, CriticCfg, PrivilegedCriticMLP, TeacherActorMLP
 from legged_lab.supermimic.replay_buffer import G1ReplayBuffer
+from legged_lab.supermimic.symmetry import G1SagittalSymmetry
 from legged_lab.supermimic.usd_fk import UsdArticulationFK
 from legged_lab.supermimic.world_model import G1WorldModel, WorldModelCfg
 from legged_lab.utils import task_registry
@@ -48,6 +49,7 @@ def run_tests() -> None:
     device = env.device
 
     fk = UsdArticulationFK(env.robot, device=device)
+    sym = G1SagittalSymmetry(env, fk, device=device)
     diff_rew = DifferentiableG1Rewards(env, fk).to(device)
 
     # 1. Test 60-D observation parity after stepping with random actions
@@ -141,14 +143,74 @@ def run_tests() -> None:
         tot_mae = float((total_diff[non_term_mask] - rew_true[non_term_mask]).abs().mean().item())
         print(f"  --> Total Step Reward MAE (non-terminal envs): {tot_mae:.3e}")
 
-    # 3. Test pre-reset capture on actual fall events + Replay Buffer + WM + Analytic BPTT
+    # 2b. Test Exact Sagittal Mirror-Symmetry Equivariance (60D Obs, Heading Command, & 31-Term Rewards)
+    obs_from_mir = diff_rew.build_actor_obs(
+        sym.mirror_state(s_now),
+        sym.mirror_cmd(cmd_now),
+        sym.mirror_act(prev_act),
+        fc_now.flip(-1),
+        add_noise=False,
+        ste_contacts=True,
+    )
+    obs_mir_direct = sym.mirror_obs(obs_diff)
+    sym_obs_err = float((obs_from_mir - obs_mir_direct).abs().max().item())
+    assert sym_obs_err < 1.0e-5, f"Sagittal 60D obs equivariance failed: {sym_obs_err}"
+
+    cmd_upd_orig = diff_rew.update_command_in_imagination(
+        snap["s"], snap["cmd"], snap["heading_target"], snap["is_heading"], snap["is_standing"]
+    )
+    cmd_upd_mir = diff_rew.update_command_in_imagination(
+        sym.mirror_state(snap["s"]),
+        sym.mirror_cmd(snap["cmd"]),
+        -snap["heading_target"],
+        snap["is_heading"],
+        snap["is_standing"],
+    )
+    sym_cmd_err = float((cmd_upd_mir - sym.mirror_cmd(cmd_upd_orig)).abs().max().item())
+    assert sym_cmd_err < 1.0e-5, f"Sagittal heading command equivariance failed: {sym_cmd_err}"
+
+    total_mir, d_soft_mir, diag_mir = diff_rew(
+        s_prev=sym.mirror_state(snap["s"]),
+        s_next=sym.mirror_state(env.last_pre_reset_state),
+        action=sym.mirror_act(act),
+        prev_action=sym.mirror_act(snap["prev_action"]),
+        arm_target=sym.mirror_arm(snap["arm_tgt"]),
+        command=sym.mirror_cmd(captured["cmd_next"]),
+        is_standing_env=captured["is_standing_next"],
+        xi=env.xi,
+        foot_contact_prob=env.last_pre_reset_feet_contact.flip(-1),
+        contact_time_next=captured["ct_next"].flip(-1),
+        air_time_next=captured["at_next"].flip(-1),
+        r_impact_pred=env.last_impact_reward,
+    )
+    sym_rew_err = float((total_mir - total_diff).abs().max().item())
+    sym_done_err = float((d_soft_mir - d_soft).abs().max().item())
+    for tname, val in diag.items():
+        if tname in DifferentiableG1Rewards.IMPACT_TERM_NAMES:
+            continue
+        t_err = float((diag_mir[tname] - val).abs().max().item())
+        assert t_err < 5.0e-4, f"Reward term '{tname}' broke sagittal invariance: {t_err}"
+    print(
+        f"\n[TEST 2b] Sagittal Mirror Equivariance: 60D obs_err={sym_obs_err:.3e} | "
+        f"cmd_err={sym_cmd_err:.3e} | 31-term total_rew_err={sym_rew_err:.3e} | soft_done_err={sym_done_err:.3e}"
+    )
+    assert sym_rew_err < 5.0e-4 and sym_done_err < 1.0e-5
+
+    # 3. Test pre-reset capture on actual fall events + Replay Buffer + WM + Analytic BPTT + L_sym
     default_arm = env.custom_default_joint_pos[0, env.num_actions : env.num_actions + 14].clone()
     wm = G1WorldModel(WorldModelCfg(), diff_rew.action_scale, default_arm, env.clip_actions, device=device)
     actor = TeacherActorMLP(ActorCfg()).to(device)
     critic = PrivilegedCriticMLP(CriticCfg()).to(device)
-    wm_trainer = WorldModelTrainer(wm, WMTrainerCfg(window_k=8, batch_size=256, batches_per_update=4))
+    wm_trainer = WorldModelTrainer(
+        wm, WMTrainerCfg(window_k=8, batch_size=256, batches_per_update=4), symmetry=sym
+    )
     pi_trainer = PolicyCriticTrainer(
-        wm, actor, critic, diff_rew, PolicyTrainerCfg(horizon=24, batch_size=256)
+        wm,
+        actor,
+        critic,
+        diff_rew,
+        PolicyTrainerCfg(horizon=24, batch_size=256, symmetry_weight=1.0),
+        symmetry=sym,
     )
     buf = G1ReplayBuffer(num_envs=env.num_envs, capacity=128, device=device)
     env.attach_replay_buffer(buf)
@@ -188,27 +250,58 @@ def run_tests() -> None:
 
     print(f"\n[TEST 3] Pre-reset terminal fall states captured cleanly: {fall_captured} fall events verified (pre_z < 0.30m, post_z > 0.65m)")
 
-    # 4. Verify World Model loss descent & 24-step Analytic BPTT gradient norms
+    # 4. Verify World Model loss descent & 24-step Analytic BPTT + L_sym gradient norms
     wm_s0 = wm_trainer.update(buf, env.xi, num_batches=2)
     for _ in range(15):
         wm_s1 = wm_trainer.update(buf, env.xi, num_batches=4)
     print(
-        f"[TEST 4a] WM 8-step fitting: loss {wm_s0['wm/loss']:.4f} -> {wm_s1['wm/loss']:.4f} | "
+        f"[TEST 4a] WM 8-step fitting (50/50 mirror-aug): loss {wm_s0['wm/loss']:.4f} -> {wm_s1['wm/loss']:.4f} | "
         f"nse_1step {wm_s0['wm/nse_1step']:.4f} -> {wm_s1['wm/nse_1step']:.4f} | "
         f"nse_8step {wm_s0['wm/nse_kstep']:.4f} -> {wm_s1['wm/nse_kstep']:.4f} | "
         f"contact_acc {wm_s1['wm/contact_acc']:.3f}"
     )
     assert wm_s1["wm/loss"] < wm_s0["wm/loss"], "WM loss did not decrease!"
 
+    # Perturb actor final layer to non-trivial asymmetric action scale (~0.3) so sym_mse starts non-zero
+    with torch.no_grad():
+        last_lin = [m for m in actor.actor.modules() if isinstance(m, torch.nn.Linear)][-1]
+        last_lin.weight.add_(0.15 * torch.randn_like(last_lin.weight))
+        last_lin.bias.add_(0.15 * torch.randn_like(last_lin.bias))
+
+    # Verify fixed-point standing exclusion gate: 0.0 on symmetric standing, 1.0 on active single-support stride
+    obs_sym_stand = torch.zeros(4, 60, device=device)
+    obs_sym_stand[:, 5] = -1.0  # upright gravity
+    obs_sym_stand[:, 6] = 0.45  # straight walk command vx=0.45
+    obs_sym_stand[:, 9] = 0.74  # height=0.74
+    obs_sym_stand[:, 58:60] = 1.0  # double-support contact [1, 1]
+    assert torch.allclose(obs_sym_stand, sym.mirror_obs(obs_sym_stand)), "Constructed standing obs must be mirror-fixed!"
+    g_stand = sym.obs_asymmetry_gate(obs_sym_stand)
+    assert float(g_stand.max().item()) == 0.0, f"Expected gate == 0.0 at symmetric standing, got {g_stand}"
+
+    obs_stride = obs_sym_stand.clone()
+    obs_stride[:, 13 + 0] = -0.35  # left hip pitch forward
+    obs_stride[:, 13 + 6] = 0.20  # right hip pitch backward
+    obs_stride[:, 58] = 0.0  # left foot swing, right foot stance
+    g_stride = sym.obs_asymmetry_gate(obs_stride)
+    assert float(g_stride.min().item()) == 1.0, f"Expected gate == 1.0 on active stride, got {g_stride}"
+    print(f"[TEST 2c] Fixed-Point Standing Exclusion Gate: standing_gate={g_stand.max().item():.3f} | active_stride_gate={g_stride.min().item():.3f}")
+
     pi_trainer.pretrain_critic_only(buf, env.xi, num_updates=3)
-    pi_s = pi_trainer.update(buf, env.xi)
+    pi_trainer.set_symmetry_weight(0.0)
+    pi_w0 = pi_trainer.update(buf, env.xi)
+    assert pi_w0["actor/sym_weight"] == 0.0
+    pi_trainer.set_symmetry_weight(2.0)
+    pi_s0 = pi_trainer.update(buf, env.xi)
+    for _ in range(15):
+        pi_s1 = pi_trainer.update(buf, env.xi)
     print(
-        f"[TEST 4b] 24-step Analytic BPTT: J={pi_s['actor/objective_J']:.4f} | "
-        f"grad_norm={pi_s['actor/grad_norm']:.4f} | surv_H={pi_s['imag/survival_H']:.3f} | "
-        f"critic_loss={pi_s['critic/loss']:.4f}"
+        f"[TEST 4b] 24-step Analytic BPTT + Phase-Gated L_sym (CUDAGraph): J={pi_s1['actor/objective_J']:.4f} | "
+        f"sym_mse {pi_s0['actor/sym_mse']:.6e} -> {pi_s1['actor/sym_mse']:.6e} (gate_frac={pi_s1['actor/sym_gate_frac']:.3f}) | "
+        f"grad_norm={pi_s1['actor/grad_norm']:.4f} | surv_H={pi_s1['imag/survival_H']:.3f}"
     )
-    assert math_isfinite(pi_s["actor/grad_norm"]) and pi_s["actor/grad_norm"] > 0.0, "Invalid actor BPTT grad norm!"
-    print("\n[ALL PARITY & BPTT VERIFICATION TESTS PASSED!]")
+    assert math_isfinite(pi_s1["actor/grad_norm"]) and pi_s1["actor/grad_norm"] > 0.0, "Invalid actor BPTT grad norm!"
+    assert pi_s1["actor/sym_mse"] < pi_s0["actor/sym_mse"], "Symmetry equivariance MSE did not decrease!"
+    print("\n[ALL PARITY, SAGITTAL SYMMETRY & BPTT VERIFICATION TESTS PASSED!]")
 
 
 def math_isfinite(x: float) -> bool:

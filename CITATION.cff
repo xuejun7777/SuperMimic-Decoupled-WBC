@@ -3,8 +3,10 @@ message: "If you use SuperMimic-Decoupled-WBC in your research, please cite this
 title: "SuperMimic-Decoupled-WBC: Reference-Free Differentiable World Model RL for Humanoid Loco-Manipulation Whole-Body Control"
 type: software
 license: BSD-3-Clause
-version: 0.1.0
-date-released: "2026-10-31"
+version: 0.2.0
+date-released: "2026-11-01"
+repository-code: "https://github.com/xuejun7777/SuperMimic-Decoupled-WBC"
+url: "https://github.com/xuejun7777/SuperMimic-Decoupled-WBC"
 authors:
   - name: "SuperMimic-Decoupled-WBC Contributors"
 keywords:
