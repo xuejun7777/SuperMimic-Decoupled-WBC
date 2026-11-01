@@ -6,16 +6,16 @@
   <img src="https://img.shields.io/badge/Isaac_Lab-2.2.0_(Isaac_Sim_5.x)-76B900?style=flat-square&logo=nvidia" alt="Isaac Lab 2.2">
   <img src="https://img.shields.io/badge/PyTorch-2.7_%7C_CUDA_Graph-EE4C2C?style=flat-square&logo=pytorch" alt="PyTorch 2.7">
   <img src="https://img.shields.io/badge/Robot-Unitree_G1_(29_DoF)-007EC6?style=flat-square" alt="Unitree G1">
-  <img src="https://img.shields.io/badge/Single_RTX_4090-3.3_Hours_(295M_Steps)-2EA44F?style=flat-square" alt="Single GPU 3.3h">
+  <img src="https://img.shields.io/badge/Single_RTX_4090-3.5_Hours_(295M_Steps)-2EA44F?style=flat-square" alt="Single GPU 3.5h">
   <img src="https://img.shields.io/badge/License-BSD--3--Clause-blue?style=flat-square" alt="BSD-3-Clause">
 </p>
 
 <p align="center">
-  <img src="docs/assets/supermimic_vs_ppo_teaser.gif" alt="Reference-Free SuperMimic vs Native RSL-RL PPO at Equal 295M Step Budget" width="100%">
+  <img src="docs/assets/supermimic_vs_ppo_teaser.gif" alt="Reference-Free SuperMimic (Phase-Gated Symmetry) vs Native RSL-RL PPO at Equal 295M Step Budget" width="100%">
 </p>
 
-> **Left**: **Reference-Free SuperMimic (`3,000` iters / `295M` steps, `3.3h` on 1× RTX 4090)** &nbsp;|&nbsp; **Right**: **Native RSL-RL PPO (`3,000` iters / `295M` steps)**  
-> *Both policies are trained completely from scratch without MoCap reference trajectories and evaluated in Isaac Sim PhysX under identical initial states, identical continuous 14-DoF AMASS bimanual arm-swing disturbances, and a 6-phase 7D loco-manipulation command schedule.*
+> **Left**: **Reference-Free SuperMimic + Phase-Gated Mirror Symmetry (`3,000` iters / `295M` steps, `3.5h` on 1x RTX 4090)** &nbsp;|&nbsp; **Right**: **Native RSL-RL PPO (`3,000` iters / `295M` steps)**  
+> *Both policies are trained completely from scratch without MoCap reference trajectories and evaluated in Isaac Sim PhysX under identical initial states, identical continuous 14-DoF AMASS bimanual arm-swing disturbances, and a 6-phase 7D loco-manipulation command schedule. Full 18s 720p@50fps video: [`docs/assets/supermimic_vs_ppo_demo.mp4`](docs/assets/supermimic_vs_ppo_demo.mp4).*
 
 ---
 
@@ -23,7 +23,7 @@
 
 Original **SuperMimic** (*Scaling Humanoid Whole-Body Control with One Differentiable World Model*) demonstrated the power of learned differentiable dynamics + analytic Backpropagation Through Time (BPTT) on **MoCap motion tracking**, where Reference State Initialization (RSI) and dense per-joint MoCap targets anchor exploration.
 
-**SuperMimic-Decoupled-WBC** asks a fundamental question for general robotics RL:
+**SuperMimic-Decoupled-WBC** explores a fundamental question for general robotics RL:
 
 > *Can Differentiable World Models + Analytic BPTT replace zero-order PPO **completely without MoCap reference trajectories (Reference-Free)** as a general-purpose training paradigm for **humanoid loco-manipulation foundation controllers**?*
 
@@ -31,16 +31,20 @@ Built cleanly as a **zero-intrusion modular extension** (`legged_lab/supermimic/
 
 ### Key Highlights
 
-- **~100–240× Sample Efficiency Over Zero-Order PPO**: At `295M` environment transitions (`~3.4h` on a single RTX 4090), Reference-Free SuperMimic escapes PPO's standing-still local optimum (**`100.0%` 20s survival across all 8 evaluation suites**, **`113.23`** episode return vs `92.82` for equal-budget PPO) and matches the walking smoothness (`d_act = 1.032` vs `1.075`) of the upstream flagship PPO policy trained for **`240,000` iterations (`70.8B` transitions = `240×` more samples)**.
-- **Phase-Gated Sagittal Mirror Symmetry (`4.6×` Straighter Open-Loop Walking)**: Solves the *Phase-Free Bipedal Standing Lock* (where naive pointwise $\pi(\mathcal{M}(o))=\mathcal{M}(\pi(o))$ freezes memoryless bipeds at symmetric double-support rest $o=\mathcal{M}(o)$) via a proprioceptive fixed-point exclusion gate + 50/50 mirror-augmented world model, cutting 5s straight-walk lateral crab drift from `37.1–39.9 cm` down to **`8.1–11.3 cm`** (**`3.5–4.6×` lower than unsymmetrized SuperMimic and `4.1–5.1×` lower than `240k`-iter PPO**).
-- **Sharp Multi-Joint Posture Synergy**: Exact USD differentiable kinematics (`< 3e-6 m` parity) routes analytic reward gradients across all 15 lower-body & waist joints simultaneously—achieving **`0.46°` (`0.008 rad`)** pitch MAE on `46°` forward bows (`torso_pitch_bow`) and **`0.74°` (`0.013 rad`)** on extreme `68.8°` (`1.20 rad`) bows past G1's `±29.8°` waist mechanical hard stop (vs `23.9°` for `240k`-iter PPO).
-- **23,100–24,350+ FPS Single-GPU Throughput**: Native side-stream `torch.cuda.CUDAGraph` capture unrolls `H=24` closed-loop imagination steps + 30-body differentiable USD FK + 31 differentiable reward terms + phase-gated symmetry loss + full analytic BPTT backward pass in `bfloat16`/`fp32`.
-- **100% Drop-In RSL-RL & Physical G1 Deployment Compatibility**: Exports standard `180,367`-parameter RSL-RL checkpoints (`example/supermimic_g1_flat/model_3000.pt`, zero inference wrapper) compatible out of the box with `play_teacher.py`, `train_student.py` (BC → DAgger history distillation), and Unitree SDK2 deployment.
+- **~100-240x Sample Efficiency Over Zero-Order PPO**: At `295M` environment transitions (`~3.5h` on a single RTX 4090), Reference-Free SuperMimic escapes PPO's standing-still local optimum (**`100.0%` 20s survival across all 8 evaluation suites**, **`113.23`** episode return vs `92.82` for equal-budget PPO) and matches the walking smoothness (`d_act = 1.032` vs `1.075`) of the upstream flagship PPO policy trained for **`240,000` iterations (`70.8B` transitions = `240x` more samples)**.
+- **Phase-Gated Sagittal Mirror Symmetry (`4.6x` Straighter Open-Loop Walking)**: Solves the *Phase-Free Bipedal Standing Lock* (where naive pointwise equivariance `pi(M(o)) = M(pi(o))` freezes memoryless bipeds at symmetric double-support rest `o = M(o)`) via a proprioceptive fixed-point exclusion gate + 50/50 mirror-augmented world model, cutting 5s straight-walk lateral crab drift from `37.1-39.9 cm` down to **`8.1-11.3 cm`** (**`3.5-4.6x` lower than unsymmetrized SuperMimic and `4.1-5.1x` lower than `240k`-iter PPO**).
+- **Sharp Multi-Joint Posture Synergy**: Exact USD differentiable kinematics (`< 3e-6 m` parity) routes analytic reward gradients across all 15 lower-body & waist joints simultaneously—achieving **`0.46 deg` (`0.008 rad`)** pitch MAE on `46 deg` forward bows (`torso_pitch_bow`) and **`0.74 deg` (`0.013 rad`)** on extreme `68.8 deg` (`1.20 rad`) bows past G1's `+-29.8 deg` waist mechanical hard stop (vs `23.9 deg` for `240k`-iter PPO).
+- **23,100-24,350+ FPS Single-GPU Throughput**: Native side-stream `torch.cuda.CUDAGraph` capture unrolls `H=24` closed-loop imagination steps + 30-body differentiable USD FK + 31 differentiable reward terms + phase-gated symmetry loss + full analytic BPTT backward pass in `bfloat16`/`fp32`.
+- **100% Drop-In RSL-RL & Physical G1 Deployment Compatibility**: Exports standard `180,367`-parameter RSL-RL checkpoints (`example/supermimic_g1_flat/model_3000.pt`, zero inference wrapper) compatible out of the box with `play_teacher.py`, `train_student.py` (BC -> DAgger history distillation), and Unitree SDK2 deployment.
 - **Verifiable Zero Upstream Baseline Tampering**: Zero lines of upstream environment physics, PD gains, observations, Domain Randomization, or PPO baseline code were altered (`git diff upstream-main -- legged_lab/envs legged_lab/mdp legged_lab/assets legged_lab/scripts/train_teacher.py` is **0 bytes**).
 
 ---
 
-## Headline Benchmark & Mechanistic Diagnostics
+## Training Curves, Benchmarks & Mechanistic Diagnostics
+
+<p align="center">
+  <img src="docs/assets/supermimic_vs_ppo_curves.png" alt="SuperMimic vs PPO Training Curves, 8-Suite Benchmark Returns, and 5s Straight-Walk Lateral Drift" width="100%">
+</p>
 
 <p align="center">
   <img src="docs/assets/supermimic_vs_ppo_keyframes.png" alt="6-Phase Whole-Body Loco-Manipulation Keyframes" width="100%">
@@ -48,34 +52,21 @@ Built cleanly as a **zero-intrusion modular extension** (`legged_lab/supermimic/
 
 ### 1. Four-Way PhysX Evaluation (`512` Envs, Paired AMASS Arm Disturbances)
 
-| Policy | Env Steps | `full_random` Surv $\uparrow$ | `full_random` Return $\uparrow$ | `full_random` `vxy_err` $\downarrow$ | `full_random` `h_mae` $\downarrow$ | `full_random` `yaw_mae` $\downarrow$ | `torso_pitch_bow` (`46°`) `pitch_mae` $\downarrow$ | `D4` `5s` Straight-Walk Drift $|y|$ (Neutral / AMASS) $\downarrow$ |
+| Policy | Env Steps | `full_random` Surv ↑ | `full_random` Return ↑ | `full_random` `vxy_err` ↓ | `full_random` `h_mae` ↓ | `full_random` `yaw_mae` ↓ | `torso_pitch_bow` (`46°`) `pitch_mae` ↓ | `D4` `5s` Straight-Walk Lateral Drift (Neutral / AMASS) ↓ |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `PPO_3000` (Equal Budget) | `0.295B` (1×) | `94.9%` | `92.82` | `0.271 m/s` | `8.73 cm` | `0.025 rad` | `15.5°` (`0.271 rad`) | *frozen (`vx ≈ 0`)* |
-| `SuperMimic_3000` *(No Symmetry)* | `0.295B` (1×) | `99.6%` | `112.27` | `0.133 m/s` | `3.77 cm` | `0.024 rad` | `1.20°` (`0.021 rad`) | `37.1 cm` / `39.9 cm` |
-| **`SuperMimic_3000` *(Phase-Gated Sym, Default)*** | **`0.295B` (1×)** | **`100.0%`** | **`113.23`** | **`0.129 m/s`** | **`3.63 cm`** | **`0.016 rad`** | **`0.46°` (`0.008 rad`)** | **`8.1 cm` / `11.3 cm`** |
-| `CMU_PPO_240k` (Upstream Ceiling) | `70.78B` (**240×**) | `100.0%` | `120.94` | `0.093 m/s` | `2.87 cm` | `0.019 rad` | `0.63°` (`0.011 rad`) | `41.7 cm` / `46.2 cm` |
+| `PPO_3000` (Equal Budget) | `0.295B` (1x) | `94.9%` | `92.82` | `0.271 m/s` | `8.73 cm` | `0.025 rad` | `15.5°` (`0.271 rad`) | *frozen (`vx ≈ 0`)* |
+| `SuperMimic_3000` *(No Symmetry)* | `0.295B` (1x) | `99.6%` | `112.27` | `0.133 m/s` | `3.77 cm` | `0.024 rad` | `1.20°` (`0.021 rad`) | `37.1 cm` / `39.9 cm` |
+| **`SuperMimic_3000` *(Phase-Gated Sym, Default)*** | **`0.295B` (1x)** | **`100.0%`** | **`113.23`** | **`0.129 m/s`** | **`3.63 cm`** | **`0.016 rad`** | **`0.46°` (`0.008 rad`)** | **`8.1 cm` / `11.3 cm`** |
+| `CMU_PPO_240k` (Upstream Ceiling) | `70.78B` (**240x**) | `100.0%` | `120.94` | `0.093 m/s` | `2.87 cm` | `0.019 rad` | `0.63°` (`0.011 rad`) | `41.7 cm` / `46.2 cm` |
 
 ### 2. Why Does Reference-Free SuperMimic Beat PPO? (Mechanistic Summary)
 
 Full diagnostic suite reproducible via `legged_lab/scripts/run_diagnostics.py` — see **[Technical & Mechanistic Research Report](docs/supermimic_research_report.md)** for complete tables:
 
-1. **Millimeter/Sub-Degree Short-Horizon Digital Twin (`D1`)**: Over `H=24` open-loop steps (`0.48s`), `G1WorldModel` (with 50/50 sagittal mirror batch augmentation) maintains **`0.197 cm`** pelvis height MAE, **`0.222°`** 29-joint MAE, **`97.46%`** foot-contact accuracy, and **Pearson $r = 0.9554$** step-reward correlation against real PhysX.
-2. **High Directional Gradient SNR Without Action-Dimension Curse (`D2`)**: Across `180,367` policy parameters ($N=256, \sigma=0.20$), zero-order score-function PG suffers severe variance (`cos = -0.1226` at `1×` budget; `0.5102` at **`16×`** rollout budget), whereas single-draw Analytic BPTT achieves **`cos = 0.7721`** and routes **`68.1%`** of extreme forward-bow action sensitivity directly into coordinated lower-body counter-balancing joints (`hip_pitch + knee + ankle_pitch`).
-3. **Continuous Zero-Cost Hindsight Command Relabeling (`D3`)**: Because `G1WorldModel` is strictly **command-free**, relabeling old physical states with unseen counterfactual 7D commands correlates with branched real PhysX returns at **Pearson $r = 0.9917$** (`per-step MAE = 0.0101`).
-4. **Eliminating Single-Seed Gait Drift Without Phase Clocks (`D4`)**: Phase-asymmetry-gated sagittal equivariance reduces 5s straight-walk (`vx = 0.45 m/s`) open-loop lateral drift to **`8.1 cm`** (neutral arms) / **`11.3 cm`** (AMASS bimanual disturbances) and closed-loop heading error to **`1.88°`** (`3.4×` tighter than `CMU_PPO_240k`'s `6.47°`).
-
----
-
-## Six Generalizable Principles Beyond Humanoid WBC
-
-To help researchers port **Reference-Free SuperMimic** to other robotic domains (mobile manipulators, dexterous hands, agile quadrupeds), our design cleanly separates G1-specific glue from **six universal principles**:
-
-1. **Task-Free Dynamics vs. Task-Conditioned Imagination**: Never feed task goals/commands $g_t$ into the dynamics model $\hat{s}_{t+1} = f_\phi(s_t, a_t, u^{\text{exo}}_t, \xi)$; inject $g_t$ only into the policy and differentiable reward during imagination to unlock unbiased physics and counterfactual HER.
-2. **White-Box Kinematics + Sign-Constrained Contact/Impact Surrogates**: Chain learned state transitions into exact differentiable URDF/USD forward kinematics $\text{FK}(q)$ (`< 3e-6 m` parity); bridge discrete contacts with **STE + soft-gated timers**; parameterize impulsive collision penalties with **non-positive `-Softplus` heads** to structurally prevent positive reward hacking.
-3. **Symmetry-Reduced Manifold Integration & Pre-Reset Failure Capture**: Represent states in $SE(2)$-invariant heading-local coordinates with $SO(3)$ tangent updates, and intercept true pre-reset failure frames before vectorized GPU simulators overwrite buffers on auto-reset.
-4. **Short-Horizon Analytic BPTT ($H \approx 0.5\text{s}$) + Smooth Survival Value Bootstrap**: Truncate analytic backprop before contact chaos diverges, replace hard termination step functions with smooth survival gates $s_{t+1} \in (0, 1)$, and bootstrap infinite-horizon returns via a privileged GAE($\lambda$) Critic.
-5. **Equilibrium-Safe Init & Mixed Tube Exploration**: Replace MoCap RSI with small-gain output initialization (`orthogonal_(gain=0.01)`) inside a viable physical equilibrium basin, paired with a `20% / 80%` deterministic/noisy rollout mix to keep learned action Jacobians $\partial f_\phi / \partial a$ well-conditioned.
-6. **Fixed-Point-Excluded Morphological Equivariance (Breaking Bipedal Buridan's Ass)**: On phase-free memoryless policies, unconditional reflection equivariance $\pi(\mathcal{M}(o))=\mathcal{M}(\pi(o))$ locks symmetric rest states $o \in \mathcal{F}_{\mathcal{O}} = \{o:\mathcal{M}(o)=o\}$ onto in-phase actions ($a_L = a_R$). Gating $\mathcal{L}_{\text{sym}}$ to zero inside a tubular neighborhood of $\mathcal{F}_{\mathcal{O}}$ while ramping equivariance after skill unzipping allows spontaneous symmetry-breaking step initiation while enforcing exact mirror symmetry across alternating left/right strides.
+1. **Millimeter/Sub-Degree Short-Horizon Digital Twin (`D1`)**: Over `H=24` open-loop steps (`0.48s`), `G1WorldModel` (with 50/50 sagittal mirror batch augmentation) maintains **`0.197 cm`** pelvis height MAE, **`0.222°`** 29-joint MAE, **`97.46%`** foot-contact accuracy, and **Pearson `r = 0.9554`** step-reward correlation against real PhysX.
+2. **High Directional Gradient SNR Without Action-Dimension Curse (`D2`)**: Across `180,367` policy parameters (`N=256`, `sigma=0.20`), zero-order score-function PG suffers severe variance (`cos = -0.1226` at `1x` budget; `0.5102` at **`16x`** rollout budget), whereas single-draw Analytic BPTT achieves **`cos = 0.7721`** and routes **`68.1%`** of extreme forward-bow action sensitivity directly into coordinated lower-body counter-balancing joints (`hip_pitch + knee + ankle_pitch`).
+3. **Continuous Zero-Cost Hindsight Command Relabeling (`D3`)**: Because `G1WorldModel` is strictly **command-free**, relabeling old physical states with unseen counterfactual 7D commands correlates with branched real PhysX returns at **Pearson `r = 0.9917`** (`per-step MAE = 0.0101`).
+4. **Eliminating Single-Seed Gait Drift Without Phase Clocks (`D4`)**: Phase-asymmetry-gated sagittal equivariance reduces 5s straight-walk (`vx = 0.45 m/s`) open-loop lateral drift to **`8.1 cm`** (neutral arms) / **`11.3 cm`** (AMASS bimanual disturbances) and closed-loop heading error to **`1.88°`** (`3.4x` tighter than `CMU_PPO_240k`'s `6.47°`).
 
 ---
 
@@ -109,7 +100,7 @@ bash scripts/play_teacher.sh
 ### 3. Train Reference-Free SuperMimic From Scratch (Single GPU)
 
 ```bash
-# Train Reference-Free SuperMimic (4096 envs x 3000 iters = 295M steps, ~3.3h on 1x RTX 4090)
+# Train Reference-Free SuperMimic (4096 envs x 3000 iters = 295M steps, ~3.5h on 1x RTX 4090)
 bash scripts/train_supermimic.sh
 
 # Equal-budget Native RSL-RL PPO baseline (exact same 4096 envs, 3000 iters & pose curriculum)
@@ -194,7 +185,7 @@ See [`docs/deployment.md`](docs/deployment.md) for physical Unitree G1 SDK2 depl
 
 ## Documentation
 
-- **[Technical & Mechanistic Research Report](docs/supermimic_research_report.md)** — Complete 4-way benchmarks, `D1–D4` mechanistic & symmetry ablation studies, 6 generalizable design principles, and white-box training disclosures.
+- **[Technical & Mechanistic Research Report](docs/supermimic_research_report.md)** — Complete 4-way benchmarks, `D1–D4` mechanistic & symmetry ablation studies, and white-box training disclosures.
 - **[Upstream Training & Play Guide](docs/training.md)** & **[Physical G1 Deployment Guide](docs/deployment.md)** — Original HTD environment and Unitree SDK2 deployment manuals.
 - **[Contributing & Reproducibility Protocol](CONTRIBUTING.md)** — Baseline integrity checks and code standards.
 
