@@ -50,14 +50,18 @@ Built cleanly as a **zero-intrusion modular extension** (`legged_lab/supermimic/
   <img src="docs/assets/supermimic_vs_ppo_keyframes.png" alt="6-Phase Whole-Body Loco-Manipulation Keyframes" width="100%">
 </p>
 
-### 1. Four-Way PhysX Evaluation (`512` Envs, Paired AMASS Arm Disturbances)
+### 1. Six-Way PhysX Evaluation (`512` Envs, Paired AMASS Arm Disturbances: Teachers & Proprioceptive Students)
 
-| Policy | Env Steps | `full_random` Surv ↑ | `full_random` Return ↑ | `full_random` `vxy_err` ↓ | `full_random` `h_mae` ↓ | `full_random` `yaw_mae` ↓ | `torso_pitch_bow` (`46°`) `pitch_mae` ↓ | `D4` `5s` Straight-Walk Lateral Drift (Neutral / AMASS) ↓ |
+| Policy | Stage / Input | Env Steps | `full_random` Surv ↑ | `full_random` Return ↑ | `full_random` `vxy_err` ↓ | `full_random` `h_mae` ↓ | `torso_pitch_bow` (`46°`) `pitch_mae` ↓ | `D4` `5s` Straight-Walk Lateral Drift (Neutral / AMASS) ↓ |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `PPO_3000` (Equal Budget) | `0.295B` (1x) | `94.9%` | `92.82` | `0.271 m/s` | `8.73 cm` | `0.025 rad` | `15.5°` (`0.271 rad`) | *frozen (`vx ≈ 0`)* |
-| `SuperMimic_3000` *(No Symmetry)* | `0.295B` (1x) | `99.6%` | `112.27` | `0.133 m/s` | `3.77 cm` | `0.024 rad` | `1.20°` (`0.021 rad`) | `37.1 cm` / `39.9 cm` |
-| **`SuperMimic_3000` *(Phase-Gated Sym, Default)*** | **`0.295B` (1x)** | **`100.0%`** | **`113.23`** | **`0.129 m/s`** | **`3.63 cm`** | **`0.016 rad`** | **`0.46°` (`0.008 rad`)** | **`8.1 cm` / `11.3 cm`** |
-| `CMU_PPO_240k` (Upstream Ceiling) | `70.78B` (**240x**) | `100.0%` | `120.94` | `0.093 m/s` | `2.87 cm` | `0.019 rad` | `0.63°` (`0.011 rad`) | `41.7 cm` / `46.2 cm` |
+| `PPO_3000` (Equal Budget) | Teacher (`60D`) | `0.295B` (1x) | `94.9%` | `92.82` | `0.271 m/s` | `8.73 cm` | `15.5°` (`0.271 rad`) | *frozen (`vx ≈ 0`)* |
+| `SuperMimic_3000` *(No Sym)* | Teacher (`60D`) | `0.295B` (1x) | `99.6%` | `112.27` | `0.133 m/s` | `3.77 cm` | `1.20°` (`0.021 rad`) | `37.1 cm` / `39.9 cm` |
+| **`SuperMimic_3000` *(Sym, Default)*** | **Teacher (`60D`)** | **`0.295B` (1x)** | **`100.0%`** | **`113.23`** | **`0.129 m/s`** | **`3.63 cm`** | **`0.46°` (`0.008 rad`)** | **`8.1 cm` / `11.3 cm`** |
+| `CMU_PPO_240k` (Upstream Ceiling) | Teacher (`60D`) | `70.78B` (240x) | `100.0%` | `120.94` | `0.093 m/s` | `2.87 cm` | `0.63°` (`0.011 rad`) | `41.7 cm` / `46.2 cm` |
+| **`SM_3000_Sym_Student` *(Ours, 4k steps)*** | **Student (`116D`, No Contact)** | **`+16.4M` (`5 min`)** | **`99.6%`** | **`108.98`** | **`0.154 m/s`** | **`4.21 cm`** | **`0.86°` (`0.015 rad`)** | **`24.8 cm` / `25.3 cm`** *(yaw `5.35°`)* |
+| `CMU_Official_Student` *(Bundled Deploy)* | Student (`116D`, No Contact) | `+2.46B` (`600k` steps) | `100.0%` | `121.04` | `0.097 m/s` | `3.33 cm` | `0.57°` (`0.010 rad`) | `31.6 cm` / `34.0 cm` *(yaw `13.31°`)* |
+
+> **Proprioceptive Student Highlights (`example/supermimic_g1_flat/student_checkpoints/student_policy_jit.pt`)**: Distilled in just `4,000` steps (`1,500` BC + `2,500` DAgger, `~5 min` on 1x RTX 4090, `RMSE = 0.0461`) without foot-contact sensors (`2 x 58 = 116D` history), `SM_3000_Sym_Student` retains **`96.3%`** of its Teacher's full-random return (`108.98`), achieves **`100.0%` survival** on 7/7 targeted locomotion/posture suites, outperforms `CMU_Official_Student` on `squat_deep` (`70.99` vs `69.75`) and `extreme_pitch_1p2` (`24.8°` vs `42.4°` pitch error), and maintains **`2.5x` lower open-loop heading drift** (`5.35°` vs `13.31°`) and **`22-26%` lower straight-walk lateral drift** (`24.8 / 25.3 cm` vs `31.6 / 34.0 cm`).
 
 ### 2. Why Does Reference-Free SuperMimic Beat PPO? (Mechanistic Summary)
 

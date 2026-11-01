@@ -147,6 +147,10 @@ def _run_suite(
         _set_fixed_command(env, fixed_cmd, is_standing)
 
     obs, _ = env.get_observations()
+    is_student = getattr(policy, "_is_student_116d", False)
+    hist_buf: torch.Tensor | None = None
+    if is_student:
+        hist_buf = torch.zeros(env.num_envs, 2, 58, dtype=torch.float32, device=env.device)
 
     alive = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
     first_ep_len = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
@@ -163,13 +167,22 @@ def _run_suite(
             _set_fixed_command(env, fixed_cmd, is_standing)
             obs[:, 6:13] = env.command_generator.command * env.obs_scales.commands
 
-        actions = policy(obs)
+        if is_student and hist_buf is not None:
+            hist_buf[:, 0, :] = hist_buf[:, 1, :].clone()
+            hist_buf[:, 1, :] = obs[:, :58]
+            actions = policy(hist_buf.reshape(env.num_envs, 116))
+        else:
+            actions = policy(obs)
         if prev_actions is not None:
             act_delta_sum += float(torch.norm(actions - prev_actions, dim=-1).mean().item())
         prev_actions = actions.clone()
 
         # Step simulator; note `env.step()` auto-resets any environment with `dones > 0` (falls OR timeout)
         obs, rew, dones, _ = env.step(actions)
+        if is_student and hist_buf is not None:
+            reset_ids = (dones > 0).nonzero(as_tuple=False).flatten()
+            if len(reset_ids) > 0:
+                hist_buf[reset_ids] = 0.0
 
         # Accumulate tracking errors strictly on environments that have NOT reset on this step (F7 fix)
         still_alive = alive & (~(dones > 0))
@@ -196,6 +209,23 @@ def _run_suite(
         out[k_e] = err_sums[k_e] / denom
         out[k_e.replace("_mae", "_rmse").replace("_err", "_rmse")] = (err_sq_sums[k_e] / denom) ** 0.5
     return out
+
+
+def _load_eval_policy(env, agent_cfg, ckpt_path: str):
+    """Load either a 60D RSL-RL Teacher checkpoint or a 116D Student JIT/PT checkpoint."""
+    try:
+        jit_mod = torch.jit.load(ckpt_path, map_location=env.device)
+        jit_mod.eval()
+
+        def _student_fn(x: torch.Tensor) -> torch.Tensor:
+            return jit_mod(x)
+
+        _student_fn._is_student_116d = True  # type: ignore[attr-defined]
+        return _student_fn
+    except Exception:
+        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=os.path.dirname(ckpt_path), device=agent_cfg.device)
+        runner.load(ckpt_path, load_optimizer=False)
+        return runner.get_inference_policy(device=env.device)
 
 
 def evaluate_all() -> None:
@@ -230,9 +260,7 @@ def evaluate_all() -> None:
         print(f"[EVAL] Evaluating {label} -> {ckpt_path}", flush=True)
         print("============================================================", flush=True)
 
-        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=os.path.dirname(ckpt_path), device=agent_cfg.device)
-        runner.load(ckpt_path, load_optimizer=False)
-        policy = runner.get_inference_policy(device=env.device)
+        policy = _load_eval_policy(env, agent_cfg, ckpt_path)
 
         suite_res: dict[str, dict[str, float]] = {}
 
