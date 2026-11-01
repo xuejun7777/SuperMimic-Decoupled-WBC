@@ -10,7 +10,7 @@ against `env.reward_manager` on real transitions).
 from __future__ import annotations
 
 import math
-from typing import Tuple
+from typing import Tuple  # noqa: UP035
 
 import torch
 import torch.nn as nn
@@ -164,7 +164,7 @@ def _compute_diff_rewards_jit(
     tau_soft_hip_pitch: float,
     fall_z_threshold: float,
     fall_z_temp: float,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:  # noqa: UP006
     qj_prev = s_prev[..., 7:36]
     qd_prev = s_prev[..., 42:71]
     q_next = s_next[..., 3:7]

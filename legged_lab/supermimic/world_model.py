@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from legged_lab.supermimic.state_spec import DELTA_DIM, FEAT_DIM, STATE_DIM, XI_DIM, StateSpec, StateSpecCfg
+from legged_lab.supermimic.state_spec import DELTA_DIM, FEAT_DIM, XI_DIM, StateSpec, StateSpecCfg
 
 
 class MLP(nn.Module):

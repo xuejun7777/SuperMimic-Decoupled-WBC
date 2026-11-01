@@ -34,7 +34,6 @@ import json
 import math
 import os
 
-import isaaclab.utils.math as math_utils
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -89,7 +88,6 @@ def run_d1_world_model_horizon_fidelity(
         obs, _, _, _ = env.step(actor(obs))
 
     s_init = env.read_full_state().clone()
-    fc_init = env.read_feet_contact().clone()
     ct_init, at_init = env.read_contact_timers()
     prev_act_init = env.action_buffer._circular_buffer.buffer[:, -1, :].clone()
     cmd_base = env.command_generator.command.clone()
@@ -123,7 +121,6 @@ def run_d1_world_model_horizon_fidelity(
     # Open-loop rollout in G1WorldModel from `s_init` using exact `exec_actions` & `exec_arms`
     s_hat = s_init
     feat_hat = wm.spec.canonical(s_hat)
-    p_foot = fc_init
     ct = ct_init
     at = at_init
     prev_act = prev_act_init
@@ -189,7 +186,7 @@ def run_d1_world_model_horizon_fidelity(
             }
 
         s_hat, feat_hat = s_next, feat_next
-        p_foot, ct, at = p_foot_next, ct_next, at_next
+        ct, at = ct_next, at_next
         prev_act = exec_actions[tau]
 
     pr = torch.cat(pred_rews_all)
@@ -451,7 +448,7 @@ def run_d3_counterfactual_command_relabeling(
     physx_returns = []
     dt = float(env.step_dt)
 
-    for idx_cf, (name, cmd_tuple, is_st_bool) in enumerate(cf_commands):
+    for _name, cmd_tuple, is_st_bool in cf_commands:
         # Reset & advance identically for 40 steps under random commands to reach identical pre-branch state s_0
         _seed_all(env, args_cli.seed + 77)
         all_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
@@ -470,8 +467,6 @@ def run_d3_counterfactual_command_relabeling(
         )
         cmd_t = torch.tensor(cmd_tuple, dtype=torch.float32, device=env.device).unsqueeze(0).expand(N, 7)
         is_st_t = torch.full((N,), float(is_st_bool), device=env.device)
-        is_h_t = torch.zeros(N, device=env.device)
-        h_tgt_t = torch.zeros(N, device=env.device)
 
         # 1. Counterfactual closed-loop rollout in G1WorldModel imagination
         s_tau = snap0["s"].clone()

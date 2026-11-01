@@ -115,7 +115,9 @@ class StateSpec(nn.Module):
         self.dt = float(cfg.dt) if cfg.explicit_integration else 0.0
 
         def _rep(scales: tuple[float, ...], sizes: tuple[int, ...]) -> torch.Tensor:
-            return torch.cat([torch.full((n,), float(sc), dtype=dtype, device=device) for sc, n in zip(scales, sizes)])
+            return torch.cat(
+                [torch.full((n,), float(sc), dtype=dtype, device=device) for sc, n in zip(scales, sizes, strict=True)]
+            )
 
         self.register_buffer("err_scale", _rep(cfg.err_scale, (3, 3, 3, 3, NUM_JOINTS, NUM_JOINTS)))
         self.register_buffer("out_scale", _rep(cfg.out_scale, (3, 3, NUM_JOINTS, 3, 3, NUM_JOINTS)))

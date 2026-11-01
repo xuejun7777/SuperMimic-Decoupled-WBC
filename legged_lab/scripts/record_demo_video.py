@@ -39,7 +39,6 @@ import os
 
 import cv2
 import imageio
-import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 import numpy as np
 import omni.replicator.core as rep
@@ -80,7 +79,7 @@ def _setup_studio_visuals() -> None:
         )
 
     # Spawn visual reference grid tiles around origin so walking/turning translation is unmistakable
-    grid_root = UsdGeom.Xform.Define(stage, "/World/StudioGrid")
+    UsdGeom.Xform.Define(stage, "/World/StudioGrid")
     tile_dark = UsdShade.Material.Define(stage, "/World/Looks/TileDark")
     sh_d = UsdShade.Shader.Define(stage, "/World/Looks/TileDark/Shader")
     sh_d.CreateIdAttr("UsdPreviewSurface")
@@ -354,7 +353,7 @@ def main() -> None:
         pixelformat="yuv420p",
         macro_block_size=16,
     )
-    for f_l, f_r in zip(sm_frames, ppo_frames):
+    for f_l, f_r in zip(sm_frames, ppo_frames, strict=True):
         merged = np.concatenate([f_l, divider, f_r], axis=1)
         # Pad width from 1284 to 1280 by cropping 2px each outer border for clean 1280x720 16:9
         merged = merged[:, 2:-2, :]

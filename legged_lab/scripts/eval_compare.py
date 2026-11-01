@@ -226,9 +226,9 @@ def evaluate_all() -> None:
         if not os.path.isfile(ckpt_path):
             raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-        print(f"\n============================================================", flush=True)
+        print("\n============================================================", flush=True)
         print(f"[EVAL] Evaluating {label} -> {ckpt_path}", flush=True)
-        print(f"============================================================", flush=True)
+        print("============================================================", flush=True)
 
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=os.path.dirname(ckpt_path), device=agent_cfg.device)
         runner.load(ckpt_path, load_optimizer=False)

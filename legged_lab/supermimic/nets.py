@@ -149,7 +149,7 @@ class PrivilegedCriticMLP(nn.Module):
 
     @torch.no_grad()
     def update_ema_target(self, target: PrivilegedCriticMLP, tau: float) -> None:
-        for p_t, p_o in zip(target.net.parameters(), self.net.parameters()):
+        for p_t, p_o in zip(target.net.parameters(), self.net.parameters(), strict=True):
             p_t.lerp_(p_o, tau)
-        for b_t, b_o in zip(target.buffers(), self.buffers()):
+        for b_t, b_o in zip(target.buffers(), self.buffers(), strict=True):
             b_t.copy_(b_o)

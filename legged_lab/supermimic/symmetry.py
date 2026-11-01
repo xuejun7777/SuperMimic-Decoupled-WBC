@@ -49,7 +49,6 @@ class G1SagittalSymmetry(nn.Module):
         self.dtype = dtype
 
         usd_joint_names = list(env.robot.joint_names)
-        num_usd_joints = len(usd_joint_names)  # 29
         num_act = int(env.num_actions)  # 15
         usd_name_to_idx = {n: i for i, n in enumerate(usd_joint_names)}
 
@@ -78,7 +77,7 @@ class G1SagittalSymmetry(nn.Module):
         # 1. 29-D USD joint permutation & sign
         usd_perm = []
         usd_sign = []
-        for j_idx, j_name in enumerate(usd_joint_names):
+        for _j_idx, j_name in enumerate(usd_joint_names):
             partner = _mirror_name(j_name)
             if partner not in usd_name_to_idx:
                 raise RuntimeError(f"Missing mirror partner '{partner}' for USD joint '{j_name}'")
