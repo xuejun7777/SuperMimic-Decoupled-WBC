@@ -23,6 +23,8 @@ parser.add_argument("--sm_ckpt", type=str, required=True)
 parser.add_argument("--ppo_ckpt", type=str, required=True)
 parser.add_argument("--out_mp4", type=str, required=True)
 parser.add_argument("--out_grid_png", type=str, default="")
+parser.add_argument("--left_title", type=str, default="SuperMimic SOTA (Ours)")
+parser.add_argument("--right_title", type=str, default="Native RSL-RL PPO (Equal Budget)")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--steps", type=int, default=900)
 
@@ -210,6 +212,23 @@ def _draw_panel_hud(
     return img
 
 
+def _load_video_policy(env, agent_cfg, ckpt_path: str):
+    """Load either a 60D RSL-RL Teacher checkpoint or a 116D Student JIT checkpoint."""
+    try:
+        jit_mod = torch.jit.load(ckpt_path, map_location=env.device)
+        jit_mod.eval()
+
+        def _stu_fn(x: torch.Tensor) -> torch.Tensor:
+            return jit_mod(x)
+
+        _stu_fn._is_student_116d = True  # type: ignore[attr-defined]
+        return _stu_fn
+    except Exception:
+        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=os.path.dirname(ckpt_path), device=agent_cfg.device)
+        runner.load(ckpt_path, load_optimizer=False)
+        return runner.get_inference_policy(device=env.device)
+
+
 @torch.no_grad()
 def _record_single_policy(
     env,
@@ -244,6 +263,11 @@ def _record_single_policy(
         env.sim.render()
 
     obs, _ = env.get_observations()
+    is_student = getattr(policy, "_is_student_116d", False)
+    hist_buf: torch.Tensor | None = None
+    if is_student:
+        hist_buf = torch.zeros(env.num_envs, 2, 58, dtype=torch.float32, device=env.device)
+
     frames: list[np.ndarray] = []
     falls = 0
     cam_xy = np.array([pos0[0], pos0[1]], dtype=np.float64)
@@ -272,8 +296,17 @@ def _record_single_policy(
         eff_cmd_tuple = tuple(float(x) for x in cg.command[0].tolist())
         obs[:, 6:13] = cg.command * env.obs_scales.commands
 
-        actions = policy(obs)
+        if is_student and hist_buf is not None:
+            hist_buf[:, 0, :] = hist_buf[:, 1, :].clone()
+            hist_buf[:, 1, :] = obs[:, :58]
+            actions = policy(hist_buf.reshape(env.num_envs, 116))
+        else:
+            actions = policy(obs)
         obs, _, dones, _ = env.step(actions)
+        if is_student and hist_buf is not None:
+            reset_ids = (dones > 0).nonzero(as_tuple=False).flatten()
+            if len(reset_ids) > 0:
+                hist_buf[reset_ids] = 0.0
         if bool(((dones > 0) & (~env.time_out_buf))[0].item()):
             falls += 1
 
@@ -320,25 +353,21 @@ def main() -> None:
     torso_id = env.robot.body_names.index("torso_link")
     pelvis_id = env.robot.body_names.index("pelvis")
 
-    # 1. Record Reference-Free SuperMimic (3000 iters)
-    sm_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=os.path.dirname(args_cli.sm_ckpt), device=agent_cfg.device)
-    sm_runner.load(os.path.abspath(args_cli.sm_ckpt), load_optimizer=False)
-    sm_policy = sm_runner.get_inference_policy(device=env.device)
-    print("[VIDEO] Recording Reference-Free SuperMimic (3000 iters)...", flush=True)
+    # 1. Record Left Policy
+    sm_policy = _load_video_policy(env, agent_cfg, os.path.abspath(args_cli.sm_ckpt))
+    print(f"[VIDEO] Recording Left Policy ({args_cli.left_title})...", flush=True)
     sm_frames = _record_single_policy(
         env, sm_policy, rgb_annotator, torso_id, pelvis_id,
-        "SuperMimic (Ours, 3000 iters / 0.295B steps)", (100, 235, 165),
+        args_cli.left_title, (100, 235, 165),
         steps=args_cli.steps, seed=args_cli.seed,
     )
 
-    # 2. Record Native RSL-RL PPO (3000 iters) under exact same seed & AMASS arm motions
-    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=os.path.dirname(args_cli.ppo_ckpt), device=agent_cfg.device)
-    ppo_runner.load(os.path.abspath(args_cli.ppo_ckpt), load_optimizer=False)
-    ppo_policy = ppo_runner.get_inference_policy(device=env.device)
-    print("[VIDEO] Recording Native RSL-RL PPO (3000 iters)...", flush=True)
+    # 2. Record Right Policy under exact same seed & AMASS arm motions
+    ppo_policy = _load_video_policy(env, agent_cfg, os.path.abspath(args_cli.ppo_ckpt))
+    print(f"[VIDEO] Recording Right Policy ({args_cli.right_title})...", flush=True)
     ppo_frames = _record_single_policy(
         env, ppo_policy, rgb_annotator, torso_id, pelvis_id,
-        "Native RSL-RL PPO (3000 iters / 0.295B steps)", (255, 175, 95),
+        args_cli.right_title, (255, 175, 95),
         steps=args_cli.steps, seed=args_cli.seed,
     )
 

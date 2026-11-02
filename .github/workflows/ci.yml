@@ -20,6 +20,7 @@ jobs:
           python -m py_compile \
             legged_lab/supermimic/*.py \
             legged_lab/scripts/train_supermimic.py \
+            legged_lab/scripts/train_supermimic_student.py \
             legged_lab/scripts/eval_compare.py \
             legged_lab/scripts/run_diagnostics.py \
             legged_lab/scripts/record_demo_video.py
@@ -28,6 +29,7 @@ jobs:
           ruff check --extend-ignore E402,E501,I001 \
             legged_lab/supermimic \
             legged_lab/scripts/train_supermimic.py \
+            legged_lab/scripts/train_supermimic_student.py \
             legged_lab/scripts/eval_compare.py \
             legged_lab/scripts/run_diagnostics.py \
             legged_lab/scripts/record_demo_video.py

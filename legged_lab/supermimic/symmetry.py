@@ -255,6 +255,18 @@ class G1SagittalSymmetry(nn.Module):
     def mirror_obs(self, obs: torch.Tensor) -> torch.Tensor:
         return obs.index_select(-1, self.obs_perm) * self.obs_sign
 
+    def mirror_obs_58(self, obs_58: torch.Tensor) -> torch.Tensor:
+        """Sagittal reflection of 58D contact-free proprioceptive observation."""
+        return obs_58.index_select(-1, self.obs_perm[:58]) * self.obs_sign[:58]
+
+    def mirror_obs_history_116(self, hist_116: torch.Tensor) -> torch.Tensor:
+        """Sagittal reflection of 116D (2 x 58D) proprioceptive observation history."""
+        # hist_116 is [..., 116] representing concat(obs_{t-1}^{0:58}, obs_t^{0:58})
+        orig_shape = hist_116.shape
+        reshaped = hist_116.reshape(-1, 2, 58)
+        mirrored_58 = self.mirror_obs_58(reshaped)
+        return mirrored_58.reshape(orig_shape)
+
     def mirror_state(self, s: torch.Tensor) -> torch.Tensor:
         return s.index_select(-1, self.state_perm) * self.state_sign
 

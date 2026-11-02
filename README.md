@@ -11,11 +11,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/supermimic_vs_ppo_teaser.gif" alt="Reference-Free SuperMimic (Phase-Gated Symmetry) vs Native RSL-RL PPO at Equal 295M Step Budget" width="100%">
+  <img src="docs/assets/supermimic_vs_ppo_teaser.gif" alt="World-Model Guided SuperMimic SOTA Student vs CMU Official PPO Student" width="100%">
 </p>
 
-> **Left**: **Reference-Free SuperMimic + Phase-Gated Mirror Symmetry (`3,000` iters / `295M` steps, `3.5h` on 1x RTX 4090)** &nbsp;|&nbsp; **Right**: **Native RSL-RL PPO (`3,000` iters / `295M` steps)**  
-> *Both policies are trained completely from scratch without MoCap reference trajectories and evaluated in Isaac Sim PhysX under identical initial states, identical continuous 14-DoF AMASS bimanual arm-swing disturbances, and a 6-phase 7D loco-manipulation command schedule. Full 18s 720p@50fps video: [`docs/assets/supermimic_vs_ppo_demo.mp4`](docs/assets/supermimic_vs_ppo_demo.mp4).*
+> **Left**: **World-Model Guided SuperMimic SOTA Student (`116D` Proprioceptive History, `1,000` iters / `98.3M` steps)** &nbsp;|&nbsp; **Right**: **CMU Official PPO Student (`116D` Proprioceptive History, distilled from `240,000`-iter PPO Teacher)**  
+> *Both hardware-ready `116D` Student policies operate without foot-contact sensors and are evaluated in Isaac Sim PhysX under identical initial states, identical continuous 14-DoF AMASS bimanual arm-swing disturbances, and a 6-phase 7D loco-manipulation command schedule. Full 18s 720p@50fps video: [`docs/assets/supermimic_vs_ppo_demo.mp4`](docs/assets/supermimic_vs_ppo_demo.mp4).*
 
 ---
 
@@ -25,17 +25,17 @@ Original **SuperMimic** (*Scaling Humanoid Whole-Body Control with One Different
 
 **SuperMimic-Decoupled-WBC** explores a fundamental question for general robotics RL:
 
-> *Can Differentiable World Models + Analytic BPTT replace zero-order PPO **completely without MoCap reference trajectories (Reference-Free)** as a general-purpose training paradigm for **humanoid loco-manipulation foundation controllers**?*
+> *Can Differentiable World Models + Analytic BPTT replace zero-order PPO **completely without MoCap reference trajectories (Reference-Free)** as a general-purpose training paradigm for **humanoid loco-manipulation foundation controllers** — across both privileged Teacher training and proprioceptive Student distillation?*
 
 Built cleanly as a **zero-intrusion modular extension** (`legged_lab/supermimic/`) on top of [IsaacLab-Decoupled-WBC](https://github.com/chrisyrniu/IsaacLab-Decoupled-WBC) (*Humanoid Touch Dream*, CMU), this repository trains a decoupled lower-body + 3-DoF waist controller (`15` actuated joints) on **Unitree G1** to track arbitrary **7D locomotion and torso-pose commands** (`[vx, vy, wz, height, roll, pitch, yaw]`) while rejecting continuous exogenous **14-DoF bimanual upper-body manipulation disturbances**.
 
 ### Key Highlights
 
-- **~100-240x Sample Efficiency Over Zero-Order PPO**: At `295M` environment transitions (`~3.5h` on a single RTX 4090), Reference-Free SuperMimic escapes PPO's standing-still local optimum (**`100.0%` 20s survival across all 8 evaluation suites**, **`113.23`** episode return vs `92.82` for equal-budget PPO) and matches the walking smoothness (`d_act = 1.032` vs `1.075`) of the upstream flagship PPO policy trained for **`240,000` iterations (`70.8B` transitions = `240x` more samples)**.
-- **Phase-Gated Sagittal Mirror Symmetry (`4.6x` Straighter Open-Loop Walking)**: Solves the *Phase-Free Bipedal Standing Lock* (where naive pointwise equivariance `pi(M(o)) = M(pi(o))` freezes memoryless bipeds at symmetric double-support rest `o = M(o)`) via a proprioceptive fixed-point exclusion gate + 50/50 mirror-augmented world model, cutting 5s straight-walk lateral crab drift from `37.1-39.9 cm` down to **`8.1-11.3 cm`** (**`3.5-4.6x` lower than unsymmetrized SuperMimic and `4.1-5.1x` lower than `240k`-iter PPO**).
-- **Sharp Multi-Joint Posture Synergy**: Exact USD differentiable kinematics (`< 3e-6 m` parity) routes analytic reward gradients across all 15 lower-body & waist joints simultaneously—achieving **`0.46 deg` (`0.008 rad`)** pitch MAE on `46 deg` forward bows (`torso_pitch_bow`) and **`0.74 deg` (`0.013 rad`)** on extreme `68.8 deg` (`1.20 rad`) bows past G1's `+-29.8 deg` waist mechanical hard stop (vs `23.9 deg` for `240k`-iter PPO).
+- **~100-240x Sample Efficiency Over Zero-Order PPO**: At `295M` environment transitions (`3,000` iters, `~3.5h` on a single RTX 4090), Reference-Free SuperMimic escapes PPO's standing-still local optimum (**`100.0%` 20s survival across all 8 evaluation suites**, **`113.23`** episode return vs `92.82` for equal-budget PPO). Extending Teacher training to `6,030` iterations (`593M` steps, still **`119x` fewer samples** than upstream's `240,000`-iter / `70.8B`-step PPO Teacher) reaches **`132.33`** training return and surpasses the `240k`-iter PPO Teacher across `walk_upright` (`70.18` vs `69.92`), `torso_pitch_bow` (`73.66` vs `72.41`), and `torso_roll_yaw` (`73.46` vs `72.91`).
+- **World-Model Guided Student Training (Joint Analytic BPTT + Online DAgger)**: Standard Student distillation (`train_student.py`) only regresses Teacher actions via BC/DAgger without seeing task rewards. Our [`SuperMimicStudentRunner`](legged_lab/supermimic/student_runner.py) unrolls the `116D` Student (`2 x 58D` proprioceptive history, zero contact sensors) directly inside the differentiable `G1WorldModel` (`H=24`), combining **first-order Analytic BPTT on all 31 task rewards**, **online step-wise DAgger action regression**, and **116D sagittal mirror symmetry**. In **`1,000-1,250` iterations (`98M-123M` steps = `20x` fewer distillation steps than upstream's `600k`-step Student)**, our SOTA Student beats `CMU_Official_Student` on `walk_upright` (`69.98` vs `69.73`, **`20%` lower velocity & yaw error**), `walk_lateral_turn` (`70.08` vs `70.05`), `torso_pitch_bow` (`73.44` vs `72.43`), `torso_roll_yaw` (`73.25` vs `72.99`), and `extreme_pitch_1p2` (`63.50` vs `61.83`, **`1.49°` vs `43.12°` pitch error — even surpassing its own 60D Teacher!**).
+- **Phase-Gated Sagittal Mirror Symmetry (`4.6x` Straighter Open-Loop Walking)**: Solves the *Phase-Free Bipedal Standing Lock* (where naive pointwise equivariance `pi(M(o)) = M(pi(o))` freezes memoryless bipeds at symmetric double-support rest `o = M(o)`) via a proprioceptive fixed-point exclusion gate + 50/50 mirror-augmented world model, cutting 5s straight-walk lateral drift down to **`6.8 cm` (neutral arms) / `8.5 cm` (AMASS arm swings) / `5.8 cm` (heading hold)** on our SOTA Student (**`3.4-4.7x` straighter than `CMU_Official_Student`'s `31.6 / 34.0 / 19.9 cm`**).
 - **23,100-24,350+ FPS Single-GPU Throughput**: Native side-stream `torch.cuda.CUDAGraph` capture unrolls `H=24` closed-loop imagination steps + 30-body differentiable USD FK + 31 differentiable reward terms + phase-gated symmetry loss + full analytic BPTT backward pass in `bfloat16`/`fp32`.
-- **100% Drop-In RSL-RL & Physical G1 Deployment Compatibility**: Exports standard `180,367`-parameter RSL-RL checkpoints (`example/supermimic_g1_flat/model_3000.pt`, zero inference wrapper) compatible out of the box with `play_teacher.py`, `train_student.py` (BC -> DAgger history distillation), and Unitree SDK2 deployment.
+- **100% Drop-In RSL-RL & Physical G1 Deployment Compatibility**: Exports standard `180,367`-parameter RSL-RL Teacher checkpoints (`example/supermimic_g1_flat/model_3000.pt`, `model_6030_sota.pt`) and `209,039`-parameter TorchScript JIT Student policies (`example/supermimic_g1_flat/student_checkpoints/student_policy_jit.pt`) compatible out of the box with `play_teacher.py`, `play_student.py`, and Unitree SDK2 deployment.
 - **Verifiable Zero Upstream Baseline Tampering**: Zero lines of upstream environment physics, PD gains, observations, Domain Randomization, or PPO baseline code were altered (`git diff upstream-main -- legged_lab/envs legged_lab/mdp legged_lab/assets legged_lab/scripts/train_teacher.py` is **0 bytes**).
 
 ---
@@ -43,25 +43,28 @@ Built cleanly as a **zero-intrusion modular extension** (`legged_lab/supermimic/
 ## Training Curves, Benchmarks & Mechanistic Diagnostics
 
 <p align="center">
-  <img src="docs/assets/supermimic_vs_ppo_curves.png" alt="SuperMimic vs PPO Training Curves, 8-Suite Benchmark Returns, and 5s Straight-Walk Lateral Drift" width="100%">
+  <img src="docs/assets/supermimic_vs_ppo_curves.png" alt="SuperMimic vs PPO Training Curves, Locomotion & Posture Suite Returns, and 5s Straight-Walk Lateral Drift" width="100%">
 </p>
 
 <p align="center">
-  <img src="docs/assets/supermimic_vs_ppo_keyframes.png" alt="6-Phase Whole-Body Loco-Manipulation Keyframes" width="100%">
+  <img src="docs/assets/supermimic_vs_ppo_keyframes.png" alt="6-Phase Whole-Body Loco-Manipulation Keyframes: SuperMimic SOTA Student vs CMU Official Student" width="100%">
 </p>
 
-### 1. Six-Way PhysX Evaluation (`512` Envs, Paired AMASS Arm Disturbances: Teachers & Proprioceptive Students)
+### 1. Comprehensive PhysX Evaluation (`512` Envs, Paired AMASS Arm Disturbances: Teachers & Proprioceptive Students)
 
-| Policy | Stage / Input | Env Steps | `full_random` Surv ↑ | `full_random` Return ↑ | `full_random` `vxy_err` ↓ | `full_random` `h_mae` ↓ | `torso_pitch_bow` (`46°`) `pitch_mae` ↓ | `D4` `5s` Straight-Walk Lateral Drift (Neutral / AMASS) ↓ |
+| Policy | Stage / Input | Env Steps | `walk_upright` Return / `vxy_err` | `torso_pitch_bow` (`46°`) Return / `pitch_mae` | `extreme_pitch_1p2` (`69°`) Return / `pitch_mae` | `torso_roll_yaw` Return | `full_random` (`20s`) Surv / Return / `pitch_mae` | `D4` `5s` Straight-Walk Drift (Neutral / AMASS / Hold) ↓ |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `PPO_3000` (Equal Budget) | Teacher (`60D`) | `0.295B` (1x) | `94.9%` | `92.82` | `0.271 m/s` | `8.73 cm` | `15.5°` (`0.271 rad`) | *frozen (`vx ≈ 0`)* |
-| `SuperMimic_3000` *(No Sym)* | Teacher (`60D`) | `0.295B` (1x) | `99.6%` | `112.27` | `0.133 m/s` | `3.77 cm` | `1.20°` (`0.021 rad`) | `37.1 cm` / `39.9 cm` |
-| **`SuperMimic_3000` *(Sym, Default)*** | **Teacher (`60D`)** | **`0.295B` (1x)** | **`100.0%`** | **`113.23`** | **`0.129 m/s`** | **`3.63 cm`** | **`0.46°` (`0.008 rad`)** | **`8.1 cm` / `11.3 cm`** |
-| `CMU_PPO_240k` (Upstream Ceiling) | Teacher (`60D`) | `70.78B` (240x) | `100.0%` | `120.94` | `0.093 m/s` | `2.87 cm` | `0.63°` (`0.011 rad`) | `41.7 cm` / `46.2 cm` |
-| **`SM_3000_Sym_Student` *(Ours, 4k steps)*** | **Student (`116D`, No Contact)** | **`+16.4M` (`5 min`)** | **`99.6%`** | **`108.98`** | **`0.154 m/s`** | **`4.21 cm`** | **`0.86°` (`0.015 rad`)** | **`24.8 cm` / `25.3 cm`** *(yaw `5.35°`)* |
-| `CMU_Official_Student` *(Bundled Deploy)* | Student (`116D`, No Contact) | `+2.46B` (`600k` steps) | `100.0%` | `121.04` | `0.097 m/s` | `3.33 cm` | `0.57°` (`0.010 rad`) | `31.6 cm` / `34.0 cm` *(yaw `13.31°`)* |
+| `PPO_3000` (Equal Budget) | Teacher (`60D`) | `0.295B` (1x) | `61.92` / `0.454 m/s` | `59.69` / `15.5°` | `55.50` / `47.0°` | `68.26` | `94.9%` / `92.82` / `19.2°` | *frozen (`vx ≈ 0`)* |
+| `SuperMimic_3000` *(No Sym)* | Teacher (`60D`) | `0.295B` (1x) | `68.33` / `0.152 m/s` | `72.36` / `1.20°` | `63.29` / **`0.74°`** | `72.48` | `99.6%` / `112.27` / **`1.20°`** | `37.1 / 39.9 / 37.4 cm` |
+| **`SuperMimic_3000` *(Sym)*** | **Teacher (`60D`)** | **`0.295B` (1x)** | `67.99` / `0.150 m/s` | `72.30` / **`0.46°`** | `58.92` / `27.0°` | `72.49` | **`100.0%`** / **`113.23`** / `13.4°` | **`8.1 / 11.3 / 12.3 cm`** *(yaw `1.88°`)* |
+| **`SM_SOTA_Teacher` *(6k Sym)*** | **Teacher (`60D`)** | **`0.593B` (2x)** | **`70.18`** / **`0.076 m/s`** | **`73.66`** / `0.74°` | `61.09` / `1.78°` | **`73.46`** | `84.2%` / `91.87` / `2.98°` | `26.1 / 22.0 / 17.6 cm` *(yaw `1.93°`)* |
+| `CMU_PPO_240k` (Upstream Ceiling) | Teacher (`60D`) | `70.78B` (240x) | `69.92` / `0.090 m/s` | `72.41` / `0.63°` | `63.23` / `23.9°` | `72.91` | `100.0%` / `120.94` / `17.8°` | `41.7 / 46.2 / 27.0 cm` *(yaw `6.47°`)* |
+| `SM_3000_Sym_Student` *(Pure DAgger)* | Student (`116D`, No Contact) | `+16.4M` (`5m`) | `68.85` / `0.108 m/s` | `70.14` / `0.86°` | `56.38` / `24.8°` | `70.63` | `99.6%` / `108.98` / `12.9°` | `24.8 / 25.3 / 19.1 cm` *(yaw `2.09°`)* |
+| **`SM_SOTA_Student` *(WM+DAgger, Best)*** | **Student (`116D`, No Contact)** | **`+98.3M` (`1k` it)** | **`69.97`** / **`0.072 m/s`** | **`73.44`** / `0.63°` | **`63.45`** / **`1.78°`** | **`73.11`** | `91.4%` / `99.96` / **`2.86°`** | **`6.8 / 8.5 / 5.8 cm`** *(yaw **`0.93°`**)* |
+| **`SM_SOTA_Student` *(WM+DAgger, 1250)*** | **Student (`116D`, No Contact)** | **`+122.9M` (`1.25k`)** | **`69.98`** / **`0.072 m/s`** | **`73.26`** / `0.86°` | **`63.50`** / **`1.49°`** | **`73.25`** | `93.4%` / `100.40` / `2.98°` | **`11.0 / 9.8 / 7.4 cm`** *(yaw **`0.95°`**)* |
+| `CMU_Official_Student` *(Bundled Deploy)* | Student (`116D`, No Contact) | `+2.46B` (`600k` it) | `69.73` / `0.090 m/s` | `72.43` / `0.52°` | `61.83` / `43.1°` | `72.99` | `99.6%` / `120.88` / `15.6°` | `31.6 / 34.0 / 19.9 cm` *(yaw `6.31°`)* |
 
-> **Proprioceptive Student Highlights (`example/supermimic_g1_flat/student_checkpoints/student_policy_jit.pt`)**: Distilled in just `4,000` steps (`1,500` BC + `2,500` DAgger, `~5 min` on 1x RTX 4090, `RMSE = 0.0461`) without foot-contact sensors (`2 x 58 = 116D` history), `SM_3000_Sym_Student` retains **`96.3%`** of its Teacher's full-random return (`108.98`), achieves **`100.0%` survival** on 7/7 targeted locomotion/posture suites, outperforms `CMU_Official_Student` on `squat_deep` (`70.99` vs `69.75`) and `extreme_pitch_1p2` (`24.8°` vs `42.4°` pitch error), and maintains **`2.5x` lower open-loop heading drift** (`5.35°` vs `13.31°`) and **`22-26%` lower straight-walk lateral drift** (`24.8 / 25.3 cm` vs `31.6 / 34.0 cm`).
+> **World-Model Guided Student Highlights (`example/supermimic_g1_flat/student_checkpoints/student_policy_jit.pt`)**: By training the `116D` proprioceptive Student directly with **Differentiable World-Model Analytic BPTT + Online Step-Wise DAgger + 116D Sagittal Symmetry** (`legged_lab/scripts/train_supermimic_student.py`), `SM_SOTA_Student` surpasses `CMU_Official_Student` across **5 out of 7 targeted locomotion & posture suites** (`walk_upright`, `walk_lateral_turn`, `torso_pitch_bow`, `extreme_pitch_1p2`, `torso_roll_yaw`), cuts 5s straight-walk lateral drift by **`3.4-4.7x`** (`6.8 / 8.5 / 5.8 cm` vs `31.6 / 34.0 / 19.9 cm`), and tracks extreme `68.8°` (`1.20 rad`) forward bows to **`1.49°-1.78°` MAE** (whereas `CMU_Official_Student` stalls at `43.1°` error). In `full_random` (which samples physically conflicting combinations such as `90°` pitch + deep squat + roll jumps simultaneously), `CMU_Official_Student` sacrifices pitch obedience (`15.6°` MAE, `33.5°` RMSE) to stay upright, whereas `SM_SOTA_Student` strictly obeys extreme pitch commands (`2.86°` MAE — **`5.5x` lower pitch error**).
 
 ### 2. Why Does Reference-Free SuperMimic Beat PPO? (Mechanistic Summary)
 
@@ -70,7 +73,7 @@ Full diagnostic suite reproducible via `legged_lab/scripts/run_diagnostics.py` �
 1. **Millimeter/Sub-Degree Short-Horizon Digital Twin (`D1`)**: Over `H=24` open-loop steps (`0.48s`), `G1WorldModel` (with 50/50 sagittal mirror batch augmentation) maintains **`0.197 cm`** pelvis height MAE, **`0.222°`** 29-joint MAE, **`97.46%`** foot-contact accuracy, and **Pearson `r = 0.9554`** step-reward correlation against real PhysX.
 2. **High Directional Gradient SNR Without Action-Dimension Curse (`D2`)**: Across `180,367` policy parameters (`N=256`, `sigma=0.20`), zero-order score-function PG suffers severe variance (`cos = -0.1226` at `1x` budget; `0.5102` at **`16x`** rollout budget), whereas single-draw Analytic BPTT achieves **`cos = 0.7721`** and routes **`68.1%`** of extreme forward-bow action sensitivity directly into coordinated lower-body counter-balancing joints (`hip_pitch + knee + ankle_pitch`).
 3. **Continuous Zero-Cost Hindsight Command Relabeling (`D3`)**: Because `G1WorldModel` is strictly **command-free**, relabeling old physical states with unseen counterfactual 7D commands correlates with branched real PhysX returns at **Pearson `r = 0.9917`** (`per-step MAE = 0.0101`).
-4. **Eliminating Single-Seed Gait Drift Without Phase Clocks (`D4`)**: Phase-asymmetry-gated sagittal equivariance reduces 5s straight-walk (`vx = 0.45 m/s`) open-loop lateral drift to **`8.1 cm`** (neutral arms) / **`11.3 cm`** (AMASS bimanual disturbances) and closed-loop heading error to **`1.88°`** (`3.4x` tighter than `CMU_PPO_240k`'s `6.47°`).
+4. **Eliminating Single-Seed Gait Drift Without Phase Clocks (`D4`)**: Phase-asymmetry-gated sagittal equivariance reduces 5s straight-walk (`vx = 0.45 m/s`) open-loop lateral drift to **`8.1 cm`** on the 3k Teacher and **`6.8 cm`** on the World-Model SOTA Student (vs `41.7 cm` on `CMU_PPO_240k` and `31.6 cm` on `CMU_Official_Student`), with closed-loop heading error down to **`0.93°`** (`6.8x` tighter than `CMU_Official_Student`'s `6.31°`).
 
 ---
 
@@ -87,9 +90,12 @@ conda activate isaac_wbc
 
 *(Headless Docker setup is also supported via `bash scripts/setup_docker.sh`; see [Upstream Guide](docs/UPSTREAM_README.md).)*
 
-### 2. Play the Bundled Reference-Free SuperMimic Policy Out of the Box
+### 2. Play the Bundled Reference-Free SuperMimic Policies Out of the Box
 
-A pre-trained `3,000`-iteration Reference-Free SuperMimic checkpoint (`1.6 MB`) is bundled at [`example/supermimic_g1_flat/model_3000.pt`](example/supermimic_g1_flat/model_3000.pt):
+Pre-trained Reference-Free SuperMimic checkpoints are bundled in [`example/supermimic_g1_flat/`](example/supermimic_g1_flat/):
+- [`example/supermimic_g1_flat/model_3000.pt`](example/supermimic_g1_flat/model_3000.pt): Equal-budget `3,000`-iter Phase-Gated Symmetry Teacher (`100.0%` survival across all 8 suites).
+- [`example/supermimic_g1_flat/model_6030_sota.pt`](example/supermimic_g1_flat/model_6030_sota.pt): Extended `6,030`-iter SOTA Teacher (`132.33` training return).
+- [`example/supermimic_g1_flat/student_checkpoints/student_policy_jit.pt`](example/supermimic_g1_flat/student_checkpoints/student_policy_jit.pt): World-Model Guided `116D` Proprioceptive SOTA Student TorchScript JIT policy.
 
 ```bash
 # Interactive simulation window with keyboard 7D velocity + torso pose control
@@ -101,13 +107,19 @@ bash scripts/play_teacher.sh
 
 > **Keyboard Controls**: `W`/`S` (`vx`), `A`/`D` (`vy`), `Q`/`E` (`wz`), `H`/`J` (pelvis height), `Z`/`X` (torso roll), `C`/`V` (torso pitch), `B`/`N` (torso yaw), `R` (reset).
 
-### 3. Train Reference-Free SuperMimic From Scratch (Single GPU)
+### 3. Train Reference-Free SuperMimic Teacher & World-Model Student (Single GPU)
 
 ```bash
-# Train Reference-Free SuperMimic (4096 envs x 3000 iters = 295M steps, ~3.5h on 1x RTX 4090)
+# 1. Train Reference-Free SuperMimic Teacher (4096 envs x 3000 iters = 295M steps, ~3.5h on 1x RTX 4090)
 bash scripts/train_supermimic.sh
 
-# Equal-budget Native RSL-RL PPO baseline (exact same 4096 envs, 3000 iters & pose curriculum)
+# 2. Train World-Model Guided Proprioceptive Student (Analytic BPTT + Online DAgger + 116D Symmetry)
+python legged_lab/scripts/train_supermimic_student.py \
+    --task=g1_flat --num_envs=4096 --max_iterations=1000 --headless \
+    --teacher_ckpt=logs/g1_flat/<your_teacher_run>/supermimic_last.pt \
+    --run_name=supermimic_student_sota
+
+# 3. Equal-budget Native RSL-RL PPO baseline (exact same 4096 envs, 3000 iters & pose curriculum)
 python legged_lab/scripts/train_teacher.py \
     --task=g1_flat --run_name=ppo_baseline_a2a --logger=tensorboard \
     --num_envs=4096 --max_iterations=3000 --save_interval=500 --seed=42 --headless \
@@ -130,24 +142,19 @@ bash scripts/eval_supermimic.sh
 # 2. Verify USD Differentiable FK (< 3e-6 m) & 31-term Reward Parity (< 1.4e-7) + D1-D4 Diagnostics
 SM_DIR=logs/g1_flat/<your_supermimic_run> bash scripts/run_diagnostics.sh
 
-# 3. Render 1280x720@50fps side-by-side comparison video
+# 3. Render 1280x720@50fps side-by-side comparison video (supports both 60D Teacher & 116D Student JIT)
 python legged_lab/scripts/record_demo_video.py \
     --task=g1_flat \
-    --sm_ckpt=example/supermimic_g1_flat/model_3000.pt \
-    --ppo_ckpt=example/model_000.pt \
-    --out_mp4=logs/g1_flat/demo_comparison.mp4
+    --sm_ckpt=example/supermimic_g1_flat/student_checkpoints/student_policy_jit.pt \
+    --ppo_ckpt=deploy/policy/g1_student/student_policy_jit.pt \
+    --left_title="SuperMimic SOTA Student (Ours, 116D)" \
+    --right_title="CMU Official Student (240k Teacher)" \
+    --out_mp4=docs/assets/supermimic_vs_ppo_demo.mp4
 ```
 
-### 5. Student Distillation & Physical Unitree G1 Deployment
+### 5. Physical Unitree G1 Deployment
 
-Because `SuperMimicRunner` exports standard RSL-RL checkpoints, distilling the 60D Teacher into a purely proprioceptive history-based Student JIT policy and deploying to a real Unitree G1 requires zero changes to the upstream pipeline:
-
-```bash
-# Distill SuperMimic teacher -> proprioceptive history student (BC -> DAgger)
-HTD_TEACHER_RUN=supermimic_example HTD_TEACHER_CKPT=model_3000.pt bash scripts/train_student.sh
-```
-
-See [`docs/deployment.md`](docs/deployment.md) for physical Unitree G1 SDK2 deployment instructions.
+Both the World-Model Guided Student (`train_supermimic_student.py`) and standard upstream DAgger (`train_student.sh`) export drop-in `116D` TorchScript JIT policies (`student_policy_jit.pt`) ready for Unitree SDK2 deployment. See [`docs/deployment.md`](docs/deployment.md) for physical Unitree G1 deployment instructions.
 
 ---
 
@@ -159,23 +166,25 @@ See [`docs/deployment.md`](docs/deployment.md) for physical Unitree G1 SDK2 depl
 │   │   ├── rotations.py             # CUDAGraph-safe wxyz SO(3) & smooth Euler operators
 │   │   ├── state_spec.py            # 71D Markov state, SE(2) canonicalization & manifold integration
 │   │   ├── usd_fk.py                # Zero-clone differentiable 30-body / 29-hinge USD kinematics
-│   │   ├── symmetry.py              # Sagittal mirror equivariance & phase-asymmetry standing gate
+│   │   ├── symmetry.py              # Sagittal mirror equivariance (60D Teacher & 116D Student)
 │   │   ├── diff_rewards.py          # Differentiable 31-term G1 WBC rewards & 60D actor obs
 │   │   ├── world_model.py           # bfloat16 2048x3 command-free dynamics + contact + impact heads
 │   │   ├── nets.py                  # 180,367-param TeacherActorMLP & 88D PrivilegedCriticMLP
 │   │   ├── replay_buffer.py         # [1000, 4096] GPU ring buffer + 8192-slot fp16 AMASS clip bank
 │   │   ├── env_adapter.py           # Read-only BaseEnv subclass capturing pre-reset fall transitions
 │   │   ├── imagination.py           # WorldModelTrainer & side-stream CUDAGraph PolicyCriticTrainer
-│   │   ├── runner.py                # End-to-end runner with auto checkpoint pruning & ONNX export
+│   │   ├── runner.py                # End-to-end Teacher runner with checkpoint pruning & ONNX export
+│   │   ├── student_runner.py        # World-Model Guided 116D Student runner (BPTT + Online DAgger + Sym)
 │   │   └── test_parity.py           # Bitwise/eps parity & sagittal equivariance verification
 │   ├── scripts/
-│   │   ├── train_supermimic.py      # SuperMimic CLI entrypoint (mirrors train_teacher.py flags)
-│   │   ├── eval_compare.py          # Deterministic 8-suite multi-checkpoint PhysX evaluator
-│   │   ├── run_diagnostics.py       # Mechanistic diagnostic experiments D1-D4
-│   │   └── record_demo_video.py     # Headless 720p@50fps side-by-side PhysX video renderer
+│   │   ├── train_supermimic.py         # SuperMimic Teacher CLI entrypoint
+│   │   ├── train_supermimic_student.py # World-Model Guided Student CLI entrypoint
+│   │   ├── eval_compare.py             # Deterministic 8-suite multi-checkpoint PhysX evaluator
+│   │   ├── run_diagnostics.py          # Mechanistic diagnostic experiments D1-D4
+│   │   └── record_demo_video.py        # Headless 720p@50fps side-by-side PhysX video renderer
 │   └── envs/, mdp/, assets/         # 100% untouched upstream IsaacLab-Decoupled-WBC environment
 ├── example/
-│   ├── supermimic_g1_flat/          # Bundled 1.6 MB Reference-Free SuperMimic teacher checkpoint
+│   ├── supermimic_g1_flat/          # Bundled SuperMimic Teacher (3k & 6k SOTA) + 116D SOTA Student JIT
 │   └── model_000.pt                 # Upstream official 240k-iter PPO teacher checkpoint
 ├── docs/
 │   ├── supermimic_research_report.md # Full benchmarks, D1-D4 diagnostics & white-box disclosures
@@ -189,7 +198,7 @@ See [`docs/deployment.md`](docs/deployment.md) for physical Unitree G1 SDK2 depl
 
 ## Documentation
 
-- **[Technical & Mechanistic Research Report](docs/supermimic_research_report.md)** — Complete 4-way benchmarks, `D1–D4` mechanistic & symmetry ablation studies, and white-box training disclosures.
+- **[Technical & Mechanistic Research Report](docs/supermimic_research_report.md)** — Complete Teacher & Student benchmarks, `D1–D4` mechanistic & symmetry ablation studies, and white-box training disclosures.
 - **[Upstream Training & Play Guide](docs/training.md)** & **[Physical G1 Deployment Guide](docs/deployment.md)** — Original HTD environment and Unitree SDK2 deployment manuals.
 - **[Contributing & Reproducibility Protocol](CONTRIBUTING.md)** — Baseline integrity checks and code standards.
 

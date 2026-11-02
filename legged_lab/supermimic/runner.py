@@ -386,29 +386,32 @@ class SuperMimicRunner:
             # Pre-calibrate World Model & Privileged Critic right at the end of warmup
             if in_warmup and (local_it == eff_warmup_iters - 1) and not precalibrated:
                 tl0 = time.time()
+                n_wm_pre = self.cfg.wm_pretrain_updates if start_it == 0 else min(10, self.cfg.wm_pretrain_updates)
+                n_cr_pre = self.cfg.critic_pretrain_updates if start_it == 0 else min(5, self.cfg.critic_pretrain_updates)
                 print(
                     f"[SuperMimic] Warmup complete ({self.buffer.size}x{self.env.num_envs} transitions). "
-                    f"Pre-calibrating World Model ({self.cfg.wm_pretrain_updates} updates) & "
-                    f"Critic ({self.cfg.critic_pretrain_updates} updates)...",
+                    f"Calibrating World Model ({n_wm_pre} updates) & "
+                    f"Critic ({n_cr_pre} updates)...",
                     flush=True,
                 )
                 wm_pre = {}
-                for _ in range(self.cfg.wm_pretrain_updates):
+                for _ in range(n_wm_pre):
                     wm_pre = self.wm_trainer.update(self.buffer, self.env.xi)
                     self.total_updates += 1
                 cr_pre = self.policy_trainer.pretrain_critic_only(
-                    self.buffer, self.env.xi, num_updates=self.cfg.critic_pretrain_updates
+                    self.buffer, self.env.xi, num_updates=n_cr_pre
                 )
                 t_learn += time.time() - tl0
                 precalibrated = True
                 print(
-                    f"[SuperMimic] Pre-calibration done in {t_learn:.2f}s | "
+                    f"[SuperMimic] Calibration done in {t_learn:.2f}s | "
                     f"wm/nse_1step={wm_pre.get('wm/nse_1step', 0.0):.4f} "
                     f"wm/nse_kstep={wm_pre.get('wm/nse_kstep', 0.0):.4f} "
                     f"wm/contact_acc={wm_pre.get('wm/contact_acc', 0.0):.3f} "
                     f"critic/loss={cr_pre.get('critic/loss', 0.0):.4f}",
                     flush=True,
                 )
+
 
             self.wall_time_s += time.time() - t_iter_start
             self.current_learning_iteration = it + 1

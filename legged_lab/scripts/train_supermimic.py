@@ -61,6 +61,18 @@ parser.add_argument(
     action="store_true",
     help="Disable sagittal mirror batch augmentation on WM windows and imagination starts.",
 )
+parser.add_argument(
+    "--resume_ckpt",
+    type=str,
+    default=None,
+    help="Explicit path to supermimic_last.pt or model_*.pt to resume/fine-tune from.",
+)
+parser.add_argument(
+    "--hindsight_cmd_frac",
+    type=float,
+    default=0.0,
+    help="Fraction of imagination start batch relabeled with coupled 7D commands (D3).",
+)
 
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
@@ -121,7 +133,15 @@ def train() -> None:
     print(f"[INFO] Logging SuperMimic experiment in directory: {log_root_path}", flush=True)
 
     resume_path = None
-    if args_cli.auto_resume:
+    if args_cli.resume_ckpt:
+        resume_path = os.path.abspath(args_cli.resume_ckpt)
+        folder = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        if agent_cfg.run_name:
+            folder += f"_{agent_cfg.run_name}"
+        else:
+            folder += "_supermimic_resume"
+        log_dir = os.path.join(log_root_path, folder)
+    elif args_cli.auto_resume:
         if not agent_cfg.run_name:
             raise ValueError("--auto_resume requires --run_name.")
         log_dir = os.path.join(log_root_path, agent_cfg.run_name)
@@ -168,16 +188,18 @@ def train() -> None:
     sm_cfg.policy_trainer.symmetry_weight = float(args_cli.symmetry_weight)
     sm_cfg.policy_trainer.sym_warmup_ratio = float(args_cli.sym_warmup_ratio)
     sm_cfg.policy_trainer.sym_ramp_ratio = float(args_cli.sym_ramp_ratio)
+    sm_cfg.policy_trainer.hindsight_cmd_frac = float(args_cli.hindsight_cmd_frac)
 
     sm_cfg.actor.hidden_dims = tuple(int(x) for x in agent_cfg.policy.actor_hidden_dims)
     sm_cfg.critic.hidden_dims = tuple(int(x) for x in agent_cfg.policy.critic_hidden_dims)
 
     runner = SuperMimicRunner(env=env, cfg=sm_cfg, log_dir=log_dir, device=agent_cfg.device)
 
-    if agent_cfg.resume and resume_path is not None:
+    if (agent_cfg.resume or args_cli.resume_ckpt) and resume_path is not None:
         print(f"[INFO] Resuming SuperMimic from {resume_path}", flush=True)
         runner.load(resume_path)
         env.set_curriculum_start_iteration(runner.current_learning_iteration)
+
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)

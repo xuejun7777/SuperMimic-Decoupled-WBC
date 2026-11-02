@@ -153,3 +153,46 @@ class PrivilegedCriticMLP(nn.Module):
             p_t.lerp_(p_o, tau)
         for b_t, b_o in zip(target.buffers(), self.buffers(), strict=True):
             b_t.copy_(b_o)
+
+
+class ProprioStudentMLP(nn.Module):
+    """Proprioceptive Student policy (116 -> 512 -> 256 -> 128 -> 15).
+
+    Matches the exact state_dict layout (`policy.0.weight`, etc.) of `train_student.py`'s `StudentMLP`
+    so exported weights drop cleanly into deployment and eval_compare.py.
+    """
+
+    def __init__(
+        self,
+        obs_dim: int = 116,
+        act_dim: int = 15,
+        hidden_dims: tuple[int, ...] = (512, 256, 128),
+        activation: str = "elu",
+    ):
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_dim = obs_dim
+        act_cls = nn.ELU if activation.lower() == "elu" else nn.ReLU
+
+        for dim in hidden_dims:
+            layers.append(nn.Linear(in_dim, dim))
+            layers.append(act_cls())
+            in_dim = dim
+
+        layers.append(nn.Linear(in_dim, act_dim))
+        self.policy = nn.Sequential(*layers)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        if len(obs.shape) == 3:
+            batch_size, seq_len, obs_dim = obs.shape
+            obs = obs.reshape(batch_size, seq_len * obs_dim)
+        return self.policy(obs)
+
+
+def export_student_jit(student: ProprioStudentMLP, save_path: str) -> None:
+    """Export ProprioStudentMLP as TorchScript JIT."""
+    student_eval = copy.deepcopy(student).eval().cpu()
+    # Script the policy module
+    traced_script = torch.jit.script(student_eval)
+    traced_script.save(save_path)
+

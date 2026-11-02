@@ -72,6 +72,9 @@ class PolicyTrainerCfg:
     sym_warmup_ratio: float = 0.45
     sym_ramp_ratio: float = 0.15
     use_cudagraph: bool = True
+    # Hindsight Command Relabeling: fraction of imagination batch relabeled with coupled 7D commands
+    hindsight_cmd_frac: float = 0.0
+
 
 
 class WorldModelTrainer:
@@ -247,6 +250,40 @@ class PolicyCriticTrainer:
         """Update effective L_sym weight in-place on GPU so captured CUDA Graph uses the live scheduled weight."""
         self._cur_sym_weight = float(w)
         self._sym_weight_buf.fill_(float(w))
+
+    @torch.no_grad()
+    def _relabel_coupled_commands_(self, start: ImagStartBatch) -> None:
+        """Relabel a fraction of imagination starts with coupled full-range 7D commands (D3)."""
+        frac = float(self.cfg.hindsight_cmd_frac)
+        if frac <= 0.0:
+            return
+        B = start.command.shape[0]
+        n_rel = int(round(frac * B))
+        if n_rel <= 0:
+            return
+        dev = start.command.device
+        idx = torch.randperm(B, device=dev)[:n_rel]
+
+        # Coupled 7D command ranges matching full training distribution
+        # [lin_vel_x, lin_vel_y, ang_vel_z, body_height, body_roll, body_pitch, body_yaw]
+        vx = (torch.rand(n_rel, device=dev) * 1.6 - 0.6)  # [-0.6, 1.0]
+        vy = (torch.rand(n_rel, device=dev) * 1.0 - 0.5)  # [-0.5, 0.5]
+        wz = (torch.rand(n_rel, device=dev) * 2.0 - 1.0)  # [-1.0, 1.0]
+        h = (torch.rand(n_rel, device=dev) * 0.32 + 0.42)  # [0.42, 0.74]
+        roll = (torch.rand(n_rel, device=dev) * 1.0 - 0.5)  # [-0.5, 0.5]
+        pitch = (torch.rand(n_rel, device=dev) * 1.4 - 0.3)  # [-0.3, 1.1]
+        yaw = (torch.rand(n_rel, device=dev) * 1.8 - 0.9)  # [-0.9, 0.9]
+
+        start.command[idx, 0] = vx
+        start.command[idx, 1] = vy
+        start.command[idx, 2] = wz
+        start.command[idx, 3] = h
+        start.command[idx, 4] = roll
+        start.command[idx, 5] = pitch
+        start.command[idx, 6] = yaw
+        start.is_heading_env[idx] = 0.0  # direct ang_vel_z command
+        start.is_standing_env[idx] = 0.0  # active locomotion
+
 
     def _single_imag_step(
         self,
@@ -616,8 +653,10 @@ class PolicyCriticTrainer:
         """Run one H-step Analytic BPTT Actor update followed by GAE Critic update."""
         cfg = self.cfg
         start = buffer.sample_starts(cfg.batch_size, cfg.horizon, xi_per_env)
+        self._relabel_coupled_commands_(start)
         if cfg.use_mirror_augmentation and self.symmetry is not None and self._cur_sym_weight > 0.0:
             self.symmetry.augment_imag_start_half_(start, min_asym_radius=cfg.sym_tau_high)
+
 
         if cfg.use_cudagraph and start.state.is_cuda:
             if self._bptt_graph is None:
