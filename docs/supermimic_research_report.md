@@ -28,7 +28,7 @@ flowchart LR
 - **Zero Upstream Baseline Modification**: All 283 upstream files in `legged_lab/envs/`, `legged_lab/mdp/`, `legged_lab/assets/`, and `legged_lab/scripts/train_teacher.py` remain 100% untouched (`git diff upstream-main -- legged_lab/envs legged_lab/mdp legged_lab/assets legged_lab/scripts/train_teacher.py` is 0 bytes).
 - **Drop-In Deployment Compatibility**:
   - The trained `TeacherActorMLP` (`60 -> [512, 256, 128] (ELU) -> 15`, `180,367` parameters, zero inference wrapper) shares the exact inference topology and 60D observation vector of the upstream RSL-RL PPO teacher.
-  - The trained `StudentMLP` (`116 -> [512, 256, 128] (ELU) -> 15`, `209,039` parameters) exported by [`SuperMimicStudentRunner`](../legged_lab/supermimic/student_runner.py) shares the exact 2-step 58D proprioceptive history input (zero foot-contact sensors) and TorchScript JIT format as upstream `deploy/policy/g1_student/student_policy_jit.pt`.
+  - The trained `StudentMLP` (`116 -> [512, 256, 128] (ELU) -> 15`, `226,063` parameters) exported by [`SuperMimicStudentRunner`](../legged_lab/supermimic/student_runner.py) shares the exact 2-step 58D proprioceptive history input (zero foot-contact sensors) and TorchScript JIT format as upstream `deploy/policy/g1_student/student_policy_jit.pt`.
 
 ---
 
@@ -65,7 +65,7 @@ All checkpoints are evaluated deterministically across `512` parallel PhysX envi
 
 ### 2.3 Hardware-Ready Proprioceptive Student Benchmark (`116D` 2-Step History, Zero Contact Sensor)
 
-Because physical Unitree G1 robots do not have binary foot-contact sensors, hardware deployment uses a `116 -> [512, 256, 128] (ELU) -> 15` `StudentMLP` (`209,039` parameters) that observes 2 steps of 58D proprioception (`obs[:, :58]`).
+Because physical Unitree G1 robots do not have binary foot-contact sensors, hardware deployment uses a `116 -> [512, 256, 128] (ELU) -> 15` `StudentMLP` (`226,063` parameters) that observes 2 steps of 58D proprioception (`obs[:, :58]`).
 
 Standard Student distillation (`legged_lab/scripts/train_student.py`) only minimizes action MSE/RMSE against the Teacher without seeing task rewards. Our **World-Model Guided Student Trainer** ([`legged_lab/supermimic/student_runner.py`](../legged_lab/supermimic/student_runner.py), launched via [`legged_lab/scripts/train_supermimic_student.py`](../legged_lab/scripts/train_supermimic_student.py)) rolls out the `116D` Student inside the differentiable `G1WorldModel` (`H=24`) while jointly optimizing:
 1. **First-Order Analytic BPTT on all 31 Task Rewards** (plus Privileged Critic GAE bootstrap);
